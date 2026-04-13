@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy import text
+from sqlalchemy import inspect
 
 from core.security import verify_password, create_access_token, hash_password
 from core.deps import get_db, get_current_user
@@ -30,7 +31,80 @@ settings = get_settings()
 
 
 def ensure_auth_security_schema(db: Session) -> None:
-    """Schema is managed centrally by ORM metadata creation."""
+    """
+    Backfill auth-critical columns for legacy/migrated databases.
+    This prevents login 500s when `users` exists with older schema.
+    """
+    bind = db.get_bind()
+    if bind is None:
+        return None
+
+    dialect = str(bind.dialect.name or "").lower()
+    inspector = inspect(bind)
+    try:
+        existing = {col["name"] for col in inspector.get_columns("users")}
+    except Exception:
+        return None
+
+    # Columns required by the current User ORM model.
+    # Keep SQL generic enough for PostgreSQL + SQLite.
+    required_columns = {
+        "student_code": "VARCHAR(50)",
+        "admission_year": "VARCHAR(20)",
+        "college": "VARCHAR(100)",
+        "major": "VARCHAR(100)",
+        "level": "VARCHAR(20)",
+        "national_id": "VARCHAR(50)",
+        "nationality": "VARCHAR(50)",
+        "gender": "VARCHAR(10)",
+        "birth_place": "VARCHAR(100)",
+        "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "theme_preference": "VARCHAR(10) NOT NULL DEFAULT 'system'",
+        "avatar_size_px": "INTEGER NOT NULL DEFAULT 48",
+        "must_change_password": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "password_changed_at": "TIMESTAMP",
+        "password_history_json": "TEXT NOT NULL DEFAULT '[]'",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+    }
+
+    statements: list[str] = []
+    for col, ddl in required_columns.items():
+        if col in existing:
+            continue
+        if dialect == "postgresql":
+            statements.append(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {ddl}")
+        else:
+            statements.append(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+
+    if not statements:
+        return None
+
+    for stmt in statements:
+        try:
+            db.execute(text(stmt))
+        except Exception:
+            # Ignore duplicate/add errors to keep login resilient.
+            pass
+
+    # Fill nullable timestamps for stricter response schema expectations.
+    try:
+        db.execute(text("UPDATE users SET created_at = NOW() WHERE created_at IS NULL"))
+    except Exception:
+        pass
+    try:
+        db.execute(text("UPDATE users SET updated_at = NOW() WHERE updated_at IS NULL"))
+    except Exception:
+        pass
+    try:
+        db.execute(text("UPDATE users SET password_history_json = '[]' WHERE password_history_json IS NULL"))
+    except Exception:
+        pass
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
     return None
 
 
@@ -232,6 +306,8 @@ def _send_student_credentials_email(email: str, username: str, password: str) ->
 @router.post("/login", response_model=Token)
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Authenticate user and return a JWT token with profile data."""
+    ensure_auth_security_schema(db)
+
     # Accept username/email/student_code in the same login field for compatibility.
     user = db.query(User).filter(
         or_(
