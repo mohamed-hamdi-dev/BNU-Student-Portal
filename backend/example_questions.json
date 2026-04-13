@@ -1,0 +1,61 @@
+{
+  "questions": [
+    {
+      "category": "General Knowledge",
+      "questions": [
+        "What is artificial intelligence?",
+        "What is machine learning?",
+        "Explain how machine learning works",
+        "What is the difference between AI and machine learning?",
+        "What is deep learning?",
+        "How does neural network training work?"
+      ]
+    },
+    {
+      "category": "GPA Calculator",
+      "questions": [
+        "How does the GPA calculator work?",
+        "What grades are accepted in the GPA calculator?",
+        "How do I calculate my GPA?",
+        "What is the grade point value for an A+?",
+        "What is the grade point value for a B-?",
+        "How many credits should I take per semester?",
+        "What's the difference between weighted and unweighted GPA?"
+      ]
+    },
+    {
+      "category": "Technical",
+      "questions": [
+        "What is FastAPI?",
+        "How does RAG (Retrieval-Augmented Generation) work?",
+        "What is a vector database?",
+        "What is ChromaDB?",
+        "How does document indexing work?",
+        "What is LangChain?",
+        "Explain the difference between RAG and fine-tuning"
+      ]
+    },
+    {
+      "category": "Conversational",
+      "questions": [
+        "Hello, how are you?",
+        "Can you help me with my studies?",
+        "What can you do?",
+        "Tell me about yourself",
+        "What are your capabilities?",
+        "How can you help me?"
+      ]
+    },
+    {
+      "category": "Follow-up Questions",
+      "questions": [
+        "Tell me more about that",
+        "Can you explain that in simpler terms?",
+        "What are some examples?",
+        "How does that work in practice?",
+        "What are the benefits?",
+        "What are the limitations?"
+      ]
+    }
+  ]
+}

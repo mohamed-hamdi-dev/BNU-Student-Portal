@@ -1,0 +1,463 @@
+"""
+Authentication and OTP router.
+Handles login (JWT issuance), OTP generation, and password resets.
+"""
+
+from datetime import datetime, timedelta, timezone
+import json
+import smtplib
+from email.message import EmailMessage
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy import text
+
+from core.security import verify_password, create_access_token, hash_password
+from core.deps import get_db, get_current_user
+from core.config import get_settings
+from models.user import User
+from models.account_request import AccountRequest
+from models.otp import OTPRequest as OTPModel
+from models.user_contact import UserContactSettings
+from schemas.auth import LoginRequest, Token, OTPRequest, OTPVerify, ResetPassword, ChangePassword, AccountRequestCreate
+from schemas.user import UserProfileResponse
+
+import secrets
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+settings = get_settings()
+
+
+def ensure_auth_security_schema(db: Session) -> None:
+    """Schema is managed centrally by ORM metadata creation."""
+    return None
+
+
+def _load_password_history(user: User) -> list[str]:
+    raw = str(getattr(user, "password_history_json", "") or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [str(item) for item in data if str(item or "").strip()]
+    except Exception:
+        pass
+    return []
+
+
+def _save_password_history(user: User, history: list[str]) -> None:
+    limit = max(1, int(settings.PASSWORD_HISTORY_LIMIT or 3))
+    user.password_history_json = json.dumps(history[:limit], ensure_ascii=False)
+
+
+def _to_utc_datetime(value):
+    if not value:
+        return None
+    if not isinstance(value, datetime):
+        return None
+    # SQLite may return naive datetimes even for timezone=True columns.
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _is_password_expired(user: User) -> bool:
+    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+    if max_age_days <= 0:
+        return False
+    changed_at = _to_utc_datetime(getattr(user, "password_changed_at", None))
+    if not changed_at:
+        return True
+    expiry = changed_at + timedelta(days=max_age_days)
+    return datetime.now(timezone.utc) >= expiry
+
+
+def _password_expires_at(user: User):
+    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+    changed_at = _to_utc_datetime(getattr(user, "password_changed_at", None))
+    if max_age_days <= 0 or not changed_at:
+        return None
+    return changed_at + timedelta(days=max_age_days)
+
+
+# ── Internal OTP Email helper (Placeholder for now) ───────────────────
+async def _send_otp_email(email: str, otp: str) -> None:
+    msg = EmailMessage()
+    msg["Subject"] = "BNU Portal - OTP Verification Code"
+    msg["From"] = settings.MAIL_USERNAME
+    msg["To"] = email
+    msg.set_content(
+        f"Your OTP code is: {otp}\n\n"
+        f"This code will expire in {max(1, settings.OTP_TTL_SECONDS // 60)} minutes."
+    )
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+            server.send_message(msg)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"OTP email send failed: {exc}") from exc
+
+
+def _digits_only(value: str) -> str:
+    mapped = str(value or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    return "".join(ch for ch in mapped if ch.isdigit())
+
+
+def _to_year_no(value: str) -> int:
+    digits = _digits_only(value)
+    if digits:
+        return int(digits)
+    txt = str(value or "").strip().lower()
+    mapping = {
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+        "الفرقة الأولى": 1,
+        "الفرقة الاولى": 1,
+        "الفرقة الثانية": 2,
+        "الفرقة الثالثة": 3,
+        "الفرقة الرابعة": 4,
+    }
+    for key, val in mapping.items():
+        if key in txt:
+            return val
+    return 0
+
+
+def _college_code(college: str) -> str:
+    normalized = str(college or "").strip().lower()
+    if "computer" in normalized or "حاسب" in normalized:
+        return "03"
+    if "engineer" in normalized or "هندس" in normalized:
+        return "02"
+    if "business" in normalized or "ادارة" in normalized:
+        return "04"
+    if "medicine" in normalized or "طب" in normalized:
+        return "05"
+    if "dent" in normalized or "اسنان" in normalized:
+        return "06"
+    if "pharm" in normalized or "صيدل" in normalized:
+        return "07"
+    return "99"
+
+
+def _generate_temp_password(length: int = 10) -> str:
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%"
+    return "".join(secrets.choice(chars) for _ in range(length))
+
+
+def _send_student_credentials_email(email: str, username: str, password: str) -> None:
+    if not settings.MAIL_USERNAME or not settings.MAIL_PASSWORD:
+        raise RuntimeError("SMTP is not configured")
+    msg = EmailMessage()
+    msg["Subject"] = "BNU Portal - Account Credentials"
+    msg["From"] = settings.MAIL_USERNAME
+    msg["To"] = email
+    msg.set_content(
+        "تم إنشاء حسابك في بوابة BNU.\n\n"
+        f"Username: {username}\n"
+        f"Temporary Password: {password}\n\n"
+        "يرجى تغيير كلمة المرور بعد أول تسجيل دخول."
+    )
+    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+        server.send_message(msg)
+
+
+# ── 1. Login (JWT) ────────────────────────────────────────────────────
+@router.post("/login", response_model=Token)
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user and return a JWT token with profile data."""
+    # Accept username/email/student_code in the same login field for compatibility.
+    user = db.query(User).filter(
+        or_(
+            User.username == request.username,
+            User.email == request.username,
+            User.student_code == request.username,
+        )
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+
+    # Verify password
+    if not verify_password(request.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+
+    must_change_password = bool(getattr(user, "must_change_password", False))
+    password_expired = bool(_is_password_expired(user))
+    must_change_effective = bool(must_change_password or password_expired)
+
+    # Create token payload
+    access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    token = create_access_token(
+        data={"sub": str(user.id)}, expires_delta=access_token_expires
+    )
+
+    # Dump the safe profile to embed in response (helps frontend avoid extra fetch)
+    safe_user = UserProfileResponse.model_validate(user).model_dump(mode='json')
+
+    # Enrich login payload with per-user contact settings so frontend can show
+    # display name immediately in navbar/toggle without waiting for another screen sync.
+    contact_settings = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    resolved_display_name = (contact_settings.display_name if contact_settings and contact_settings.display_name else user.full_name)
+    resolved_recovery_email = (contact_settings.recovery_email if contact_settings and contact_settings.recovery_email else user.email)
+    resolved_phone = (contact_settings.phone_number if contact_settings else None)
+    safe_user["display_name"] = resolved_display_name
+    safe_user["displayName"] = resolved_display_name
+    safe_user["recovery_email"] = resolved_recovery_email
+    safe_user["phone_number"] = resolved_phone
+    safe_user["must_change_password"] = must_change_effective
+    safe_user["password_expired"] = password_expired
+    safe_user["password_expires_at"] = _password_expires_at(user)
+    safe_user["password_policy_days"] = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+
+    return Token(access_token=token, token_type="bearer", user=safe_user)
+
+
+# ── 2. Request OTP (Forgot Password) ──────────────────────────────────
+@router.post("/forgot-password")
+async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
+    """Generate and send an OTP to the user's registered email."""
+    submitted_aff_no = str(body.student_code or "").strip()
+    submitted_national_id = str(body.national_id or "").strip()
+    submitted_email = str(body.email or "").strip().lower()
+    if not submitted_aff_no or not submitted_national_id:
+        raise HTTPException(status_code=400, detail="Invalid recovery data")
+
+    user = db.query(User).filter(User.national_id == submitted_national_id).filter(
+        or_(
+            User.username == submitted_aff_no,
+            User.student_code == submitted_aff_no,
+        )
+    ).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid recovery data")
+
+    user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    recovery_email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").strip().lower()
+    if not recovery_email or submitted_email != recovery_email:
+        raise HTTPException(status_code=400, detail="Invalid recovery data")
+
+    # Simple 6-digit OTP
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+
+    # Hash the OTP to store
+    material = f"{recovery_email}|{otp_code}|{settings.OTP_SECRET}".encode("utf-8")
+    import hashlib
+    otp_hash = hashlib.sha256(material).hexdigest()
+
+    # Save to db
+    from datetime import datetime, timezone
+    expiry = datetime.now(timezone.utc) + timedelta(seconds=settings.OTP_TTL_SECONDS)
+
+    db_otp = OTPModel(
+        user_id=user.id,
+        otp_hash=otp_hash,
+        purpose="password_reset",
+        expires_at=expiry
+    )
+    db.add(db_otp)
+    db.commit()
+    db.refresh(db_otp)
+
+    # Send email in configured environments; expose dev OTP locally when SMTP is not configured.
+    dev_otp = None
+    if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
+        await _send_otp_email(recovery_email, otp_code)
+    else:
+        dev_otp = otp_code
+
+    response = {
+        "message": "If the email is registered, an OTP will be sent",
+        "request_id": str(db_otp.id),  # Helps correlate in the verify step
+        "expires_in_sec": settings.OTP_TTL_SECONDS,
+    }
+    if dev_otp:
+        response["dev_otp"] = dev_otp
+    return response
+
+
+# ── 3. Verify OTP ─────────────────────────────────────────────────────
+@router.post("/verify-otp")
+async def verify_otp(body: OTPVerify, db: Session = Depends(get_db)):
+    """Check if the provided OTP is valid and unexpired."""
+    try:
+        req_id = int(body.request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
+    record = db.query(OTPModel).filter(OTPModel.id == req_id).first()
+    if not record or record.is_used:
+        raise HTTPException(status_code=400, detail="Invalid or used request ID")
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    from datetime import datetime, timezone
+    if datetime.now(timezone.utc) > record.expires_at:
+        raise HTTPException(status_code=400, detail="OTP expired")
+
+    if record.attempts >= settings.OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=400, detail="Too many attempts")
+
+    user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").lower()
+    material = f"{email}|{body.otp}|{settings.OTP_SECRET}".encode("utf-8")
+    import hashlib
+    computed_hash = hashlib.sha256(material).hexdigest()
+
+    if computed_hash != record.otp_hash:
+        record.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    # Mark verified (used)
+    record.is_used = True
+    db.commit()
+
+    return {"verified": True}
+
+
+# ── 4. Reset Password (with OTP) ──────────────────────────────────────
+@router.post("/reset-password")
+async def reset_password(body: ResetPassword, db: Session = Depends(get_db)):
+    """Reset the password using a previously verified OTP request ID."""
+    try:
+        req_id = int(body.request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
+    # Note: In a robust flow, you'd only allow reset if verify_otp marked it verified,
+    # or re-verify right here. Since we're re-verifying the OTP here anyway:
+    record = db.query(OTPModel).filter(OTPModel.id == req_id).first()
+
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    # Re-verify
+    user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").lower()
+    material = f"{email}|{body.otp}|{settings.OTP_SECRET}".encode("utf-8")
+    import hashlib
+    computed_hash = hashlib.sha256(material).hexdigest()
+
+    if computed_hash != record.otp_hash:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    # Reset
+    current_hash = str(user.password_hash or "")
+    if verify_password(body.new_password, current_hash):
+        raise HTTPException(status_code=400, detail="New password cannot be the same as current password")
+    history = _load_password_history(user)
+    if any(verify_password(body.new_password, old_hash) for old_hash in history):
+        raise HTTPException(status_code=400, detail="New password was used recently")
+
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    user.password_changed_at = datetime.now(timezone.utc)
+    _save_password_history(user, [user.password_hash, current_hash, *history])
+    record.is_used = True
+    db.commit()
+
+    return {"message": "Password reset successfully"}
+
+
+# ── 5. Change Password (Logged In) ────────────────────────────────────
+@router.post("/change-password")
+async def change_password(
+    body: ChangePassword,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Change password for an authenticated user."""
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Incorrect current password")
+
+    if verify_password(body.new_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="New password cannot be the same as current password")
+
+    history = _load_password_history(current_user)
+    if any(verify_password(body.new_password, old_hash) for old_hash in history):
+        raise HTTPException(status_code=400, detail="New password was used recently")
+
+    previous_hash = str(current_user.password_hash or "")
+    current_user.password_hash = hash_password(body.new_password)
+    current_user.must_change_password = False
+    current_user.password_changed_at = datetime.now(timezone.utc)
+    _save_password_history(current_user, [current_user.password_hash, previous_hash, *history])
+    db.commit()
+
+    return {"message": "Password changed successfully"}
+
+
+@router.post("/account-request")
+async def create_account_request(body: AccountRequestCreate, db: Session = Depends(get_db)):
+    full_name = str(body.full_name or "").strip()
+    email = str(body.email or "").strip().lower()
+    college = str(body.college or "").strip()
+    level = str(body.level or "").strip()
+    national_id_digits = _digits_only(body.national_id or "")
+
+    if len(full_name.split()) < 4:
+        raise HTTPException(status_code=400, detail="Full name must be 4 parts")
+    if len(national_id_digits) != 14:
+        raise HTTPException(status_code=400, detail="National ID must be 14 digits")
+
+    existing = db.query(User).filter(or_(User.email == email, User.national_id == national_id_digits)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Account already exists for this email or national ID")
+
+    existing_pending = (
+        db.query(AccountRequest)
+        .filter(
+            AccountRequest.status == "pending",
+            or_(AccountRequest.email == email, AccountRequest.national_id == national_id_digits),
+        )
+        .first()
+    )
+    if existing_pending:
+        raise HTTPException(status_code=400, detail="There is already a pending request for this email or national ID")
+
+    request_row = AccountRequest(
+        full_name=full_name,
+        national_id=national_id_digits,
+        college=college,
+        level=level,
+        email=email,
+        status="pending",
+    )
+    db.add(request_row)
+    db.commit()
+    db.refresh(request_row)
+
+    return {
+        "message": "Account request submitted successfully and is pending admin review",
+        "request_id": request_row.id,
+        "status": request_row.status,
+    }

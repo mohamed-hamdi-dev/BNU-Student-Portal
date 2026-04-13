@@ -1,0 +1,408 @@
+"""
+Chatbot Router.
+Handles RAG AI chat sessions and generation.
+"""
+
+from io import BytesIO
+from datetime import datetime, timezone
+from pathlib import Path
+import re
+from typing import List, Optional
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from core.config import get_settings
+from core.deps import get_current_user, get_db, require_role
+from models.chatbot import ChatbotMessage, ChatbotSession
+from models.user import User
+from rag_chatbot import RAGChatbot
+
+router = APIRouter(prefix="/chatbot", tags=["chatbot"])
+STORAGE_FILES_DIR = Path(__file__).resolve().parent.parent / "storage_files"
+STORAGE_FILES_DIR.mkdir(parents=True, exist_ok=True)
+
+# Initialize RAG globally for this router
+settings = get_settings()
+rag_chatbot = None
+if settings.GROQ_API_KEY:
+    try:
+        rag_chatbot = RAGChatbot(persist_directory="./chroma_db")
+        print("Global RAG Chatbot initialized in router.")
+    except Exception as exc:
+        print(f"Failed to initialize RAG Chatbot: {exc}")
+
+
+class ChatGenerateRequest(BaseModel):
+    session_id: str
+    message: str
+
+
+class ChatGenerateResponse(BaseModel):
+    message: str
+    sources: Optional[List[str]] = Field(None)
+
+
+def _normalize_scope_text(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = text.translate(
+        {
+            ord("\u0660"): "0",
+            ord("\u0661"): "1",
+            ord("\u0662"): "2",
+            ord("\u0663"): "3",
+            ord("\u0664"): "4",
+            ord("\u0665"): "5",
+            ord("\u0666"): "6",
+            ord("\u0667"): "7",
+            ord("\u0668"): "8",
+            ord("\u0669"): "9",
+            ord("\u06F0"): "0",
+            ord("\u06F1"): "1",
+            ord("\u06F2"): "2",
+            ord("\u06F3"): "3",
+            ord("\u06F4"): "4",
+            ord("\u06F5"): "5",
+            ord("\u06F6"): "6",
+            ord("\u06F7"): "7",
+            ord("\u06F8"): "8",
+            ord("\u06F9"): "9",
+        }
+    )
+    for src, dst in {
+        "\u0623": "\u0627",  # أ -> ا
+        "\u0625": "\u0627",  # إ -> ا
+        "\u0622": "\u0627",  # آ -> ا
+        "\u0629": "\u0647",  # ة -> ه
+        "\u0649": "\u064A",  # ى -> ي
+        "\u0624": "\u0648",  # ؤ -> و
+        "\u0626": "\u064A",  # ئ -> ي
+    }.items():
+        text = text.replace(src, dst)
+    return " ".join(text.split())
+
+
+def _canonical_college_key(value: str) -> str:
+    text = _normalize_scope_text(value)
+    if not text:
+        return ""
+    if "computer science" in text or "علوم الحاسب" in text or "حاسب" in text:
+        return "computer_science"
+    if "engineering" in text or "هندس" in text:
+        return "engineering"
+    if "business" in text or "اداره اعمال" in text or "تجاره" in text:
+        return "business"
+    if "medicine" in text or text == "طب" or "كليه الطب" in text or "كلية الطب" in text:
+        return "medicine"
+    if "pharmacy" in text or "صيدل" in text:
+        return "pharmacy"
+    if "dentistry" in text or "اسنان" in text:
+        return "dentistry"
+    return ""
+
+
+_REGULATION_INTENT_TERMS = (
+    "لائحة",
+    "لايحة",
+    "دفعة",
+    "مستوى",
+    "level",
+    "batch",
+    "regulation",
+    "college",
+    "كلية",
+    "الكليه",
+)
+
+
+def _is_regulation_intent(query: str) -> bool:
+    text = _normalize_scope_text(query or "")
+    if not text:
+        return False
+    if any(term in text for term in _REGULATION_INTENT_TERMS):
+        return True
+    return bool(re.search(r"لا\S{0,2}ح\S*", text))
+
+
+def _pdf_pages_from_upload(content: bytes) -> List[dict]:
+    try:
+        from pypdf import PdfReader
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="pypdf is not installed on the server.") from exc
+
+    reader = PdfReader(BytesIO(content))
+    pages: List[dict] = []
+    for idx, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if not text:
+            continue
+        pages.append({"page": idx, "text": text})
+    return pages
+
+
+def _chunk_pdf_pages(pages: List[dict], chunk_size: int = 900, chunk_overlap: int = 120):
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+    except Exception:
+        try:
+            from langchain.text_splitter import RecursiveCharacterTextSplitter
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Text splitter dependency is missing on the server.") from exc
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+
+    documents: List[str] = []
+    metadatas: List[dict] = []
+    for item in pages:
+        chunks = splitter.split_text(item["text"])
+        for chunk_idx, chunk in enumerate(chunks, start=1):
+            clean = " ".join(str(chunk or "").split())
+            if not clean:
+                continue
+            documents.append(clean)
+            metadatas.append({"page": item["page"], "chunk": chunk_idx})
+    return documents, metadatas
+
+
+@router.get("/sessions")
+async def get_sessions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get all past chatbot sessions for current student."""
+    sessions = (
+        db.query(ChatbotSession)
+        .filter(ChatbotSession.student_id == current_user.id)
+        .order_by(ChatbotSession.updated_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "title": s.title,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+        }
+        for s in sessions
+    ]
+
+
+@router.post("/sessions")
+async def create_session(title: str = "New Chat", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Start a new AI session."""
+    now = datetime.now(timezone.utc)
+    session = ChatbotSession(
+        student_id=current_user.id,
+        title=title,
+        mode="general",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {"id": session.id, "title": session.title}
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get full history of a specific session."""
+    session = db.query(ChatbotSession).filter(ChatbotSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your session")
+
+    messages = db.query(ChatbotMessage).filter(ChatbotMessage.session_id == session_id).order_by(ChatbotMessage.created_at.asc()).all()
+    return [{"id": m.id, "role": m.role, "text": m.text, "created_at": m.created_at} for m in messages]
+
+
+@router.post("/chat", response_model=ChatGenerateResponse)
+async def chat_with_ai(
+    req: ChatGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Send message to RAG AI and save both prompt and response to database."""
+    if rag_chatbot is None:
+        raise HTTPException(status_code=503, detail="AI Service unavailable.")
+
+    session = db.query(ChatbotSession).filter(ChatbotSession.id == req.session_id).first()
+    if not session or session.student_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Valid Session not found or owned by you")
+
+    now = datetime.now(timezone.utc)
+    user_msg = ChatbotMessage(
+        session_id=session.id,
+        role="user",
+        text=req.message,
+        created_at=now,
+    )
+    db.add(user_msg)
+
+    try:
+        is_regulation_query = _is_regulation_intent(req.message)
+        normalized_message = _normalize_scope_text(req.message)
+        is_light_chat_query = normalized_message in {"", "hi", "hello", "hey", "مرحبا", "اهلا", "السلام عليكم"}
+        should_use_retrieval = bool(not is_light_chat_query and len(str(req.message or "").strip()) >= 2)
+        should_require_grounded_retrieval = bool(is_regulation_query and not is_light_chat_query)
+        retrieval_filter = None
+        if should_use_retrieval:
+            retrieval_filter = {
+                "student_id": str(current_user.id),
+                "level": _normalize_scope_text(getattr(current_user, "level", "") or ""),
+                "college_key": _canonical_college_key(getattr(current_user, "college", "") or ""),
+                "sources": ["student_guide_pdf", "storage_pdf"],
+            }
+        response_data = rag_chatbot.chat(
+            req.message,
+            req.session_id,
+            current_user.id,
+            retrieval_filter=retrieval_filter,
+            require_retrieval=should_require_grounded_retrieval,
+            retrieve_context=should_use_retrieval,
+        )
+        ai_text = response_data["answer"]
+        sources = response_data.get("sources", [])
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"AI Error: {str(exc)}")
+
+    ai_msg = ChatbotMessage(
+        session_id=session.id,
+        role="model",
+        text=ai_text,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ai_msg)
+
+    if session.title == "New Chat":
+        session.title = req.message[:30] + "..."
+    session.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return ChatGenerateResponse(message=ai_text, sources=sources)
+
+
+@router.post("/rag/upload-pdf", dependencies=[Depends(require_role("admin"))])
+async def upload_pdf_to_rag(
+    file: UploadFile = File(...),
+    source: str = Form("student_guide_pdf"),
+    access_scope: str = Form("public"),
+    level: Optional[str] = Form(None),
+    college: Optional[str] = Form(None),
+    college_key: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    student_id: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a PDF and index it directly into the RAG vector store."""
+    if rag_chatbot is None:
+        raise HTTPException(status_code=503, detail="AI Service unavailable.")
+
+    filename = str(file.filename or "").strip()
+    is_pdf_name = filename.lower().endswith(".pdf")
+    is_pdf_type = str(file.content_type or "").lower() in {"application/pdf", "application/x-pdf"}
+    if not (is_pdf_name or is_pdf_type):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file is not allowed.")
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is too large (max 20MB).")
+
+    # Persist file so UI can open it later when returned as an asset/source.
+    stored_name = f"{uuid4().hex}.pdf"
+    destination = STORAGE_FILES_DIR / stored_name
+    destination.write_bytes(content)
+
+    pages = _pdf_pages_from_upload(content)
+    if not pages:
+        raise HTTPException(status_code=400, detail="No extractable text was found in this PDF.")
+
+    documents, metadatas = _chunk_pdf_pages(pages)
+    if not documents:
+        raise HTTPException(status_code=400, detail="No indexable chunks were generated from this PDF.")
+
+    source_name = str(source or "student_guide_pdf").strip().lower()
+    scope = str(access_scope or "public").strip().lower()
+    if scope not in {"public", "level", "student"}:
+        scope = "public"
+
+    canonical_college_key = _canonical_college_key(college_key or college or "")
+    normalized_level = _normalize_scope_text(level or "")
+    normalized_category = str(category or "").strip().lower()
+    normalized_student_id = str(student_id or "").strip()
+
+    base_metadata = {
+        "document_id": f"{source_name}:{stored_name}",
+        "source": source_name,
+        "source_type": "pdf",
+        "access_scope": scope,
+        "uploaded_by": str(current_user.id),
+        "file_name": filename or "uploaded.pdf",
+        "stored_name": stored_name,
+        "file_url": f"/api/storage/files/{stored_name}",
+    }
+    if normalized_level:
+        base_metadata["level"] = normalized_level
+    if canonical_college_key:
+        base_metadata["college_key"] = canonical_college_key
+    if normalized_category:
+        base_metadata["category"] = normalized_category
+    if normalized_student_id:
+        base_metadata["student_id"] = normalized_student_id
+
+    merged_metadata = [{**meta, **base_metadata} for meta in metadatas]
+
+    rag_chatbot.index_documents(documents, merged_metadata)
+    rag_chatbot.flush()
+
+    return {
+        "message": "PDF indexed successfully.",
+        "file_name": filename,
+        "stored_name": stored_name,
+        "file_url": f"/api/storage/files/{stored_name}",
+        "pages_indexed": len(pages),
+        "chunks_indexed": len(documents),
+        "source": source_name,
+        "access_scope": scope,
+    }
+
+
+@router.get("/rag/status", dependencies=[Depends(require_role("admin"))])
+async def rag_status():
+    """Operational status for RAG backend."""
+    if rag_chatbot is None:
+        return {
+            "ready": False,
+            "message": "AI Service unavailable.",
+            "llm_ready": False,
+            "retrieval_ready": False,
+        }
+    info = rag_chatbot.status()
+    return {
+        "ready": bool(info.get("retrieval_ready")),
+        "message": "RAG is ready." if info.get("retrieval_ready") else "RAG retrieval is not initialized.",
+        **info,
+    }
+
+
+@router.delete("/rag/clear", dependencies=[Depends(require_role("admin"))], status_code=status.HTTP_200_OK)
+async def clear_rag_index():
+    """Clear indexed RAG documents while keeping chatbot service online."""
+    if rag_chatbot is None:
+        raise HTTPException(status_code=503, detail="AI Service unavailable.")
+    result = rag_chatbot.clear_index()
+    if not result.get("cleared"):
+        raise HTTPException(status_code=500, detail=f"Failed to clear RAG index: {result.get('reason', 'unknown error')}")
+    return {
+        "message": "RAG index cleared successfully.",
+        **result,
+    }

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار API - BNU Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #05ADCF 0%, #0496B4 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .test-section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .test-section h2 {
+            color: #05ADCF;
+            margin-bottom: 15px;
+            border-bottom: 3px solid #05ADCF;
+            padding-bottom: 10px;
+        }
+        button {
+            background: #05ADCF;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 5px;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: #0496B4;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(5, 173, 207, 0.3);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        .result {
+            background: #f5f5f5;
+            border: 2px solid #05ADCF;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            direction: ltr;
+            text-align: left;
+        }
+        .result pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .success {
+            border-color: #10b981;
+            background: #ecfdf5;
+        }
+        .error {
+            border-color: #ef4444;
+            background: #fef2f2;
+            color: #dc2626;
+        }
+        .input-group {
+            margin: 15px 0;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .input-group input:focus {
+            outline: none;
+            border-color: #05ADCF;
+        }
+        .endpoint {
+            background: #e0f2fe;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-family: monospace;
+            margin: 10px 0;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 اختبار API - نظام BNU</h1>
+
+        <!-- Login Test -->
+        <div class="test-section">
+            <h2>1️⃣ تسجيل الدخول (Login)</h2>
+            <div class="endpoint">POST http://localhost:8001/login</div>
+            <div class="input-group">
+                <label>اسم المستخدم:</label>
+                <input type="text" id="username" value="1000001" placeholder="1000001">
+            </div>
+            <div class="input-group">
+                <label>كلمة المرور:</label>
+                <input type="password" id="password" value="pass123" placeholder="pass123">
+            </div>
+            <button onclick="testLogin()">اختبار تسجيل الدخول</button>
+            <div id="login-result"></div>
+        </div>
+
+        <!-- Get Grades Test -->
+        <div class="test-section">
+            <h2>2️⃣ عرض الدرجات (Get Grades)</h2>
+            <div class="endpoint">GET http://localhost:8001/api/student/{id}/grades</div>
+            <div class="input-group">
+                <label>رقم الطالب:</label>
+                <input type="text" id="student-id-grades" value="1000001" placeholder="1000001">
+            </div>
+            <button onclick="testGetGrades()">عرض الدرجات</button>
+            <div id="grades-result"></div>
+        </div>
+
+        <!-- Get Courses Test -->
+        <div class="test-section">
+            <h2>3️⃣ عرض المقررات (Get Courses)</h2>
+            <div class="endpoint">GET http://localhost:8001/api/courses</div>
+            <button onclick="testGetCourses()">عرض جميع المقررات</button>
+            <button onclick="testGetCoursesByYear('1')">مقررات السنة الأولى</button>
+            <button onclick="testGetCoursesByYear('2')">مقررات السنة الثانية</button>
+            <div id="courses-result"></div>
+        </div>
+
+        <!-- Register Course Test -->
+        <div class="test-section">
+            <h2>4️⃣ تسجيل مقرر (Register Course)</h2>
+            <div class="endpoint">POST http://localhost:8001/api/courses/register</div>
+            <div class="input-group">
+                <label>رقم الطالب:</label>
+                <input type="text" id="student-id-register" value="1000001">
+            </div>
+            <div class="input-group">
+                <label>كود المقرر:</label>
+                <input type="text" id="course-id" value="CS101">
+            </div>
+            <div class="input-group">
+                <label>رقم المجموعة:</label>
+                <input type="text" id="group-id" value="G1">
+            </div>
+            <button onclick="testRegisterCourse()">تسجيل المقرر</button>
+            <div id="register-result"></div>
+        </div>
+
+        <!-- Calculate Payment Test -->
+        <div class="test-section">
+            <h2>5️⃣ حساب المصروفات (Calculate Payment)</h2>
+            <div class="endpoint">POST http://localhost:8001/api/payment/calculate</div>
+            <div class="input-group">
+                <label>المعدل التراكمي (GPA):</label>
+                <input type="number" id="gpa" value="3.8" step="0.01" min="0" max="4">
+            </div>
+            <button onclick="testCalculatePayment()">حساب المصروفات</button>
+            <div id="payment-result"></div>
+        </div>
+
+        <!-- Get Student Stats Test -->
+        <div class="test-section">
+            <h2>6️⃣ إحصائيات الطالب (Student Stats)</h2>
+            <div class="endpoint">GET http://localhost:8001/api/student/{id}/stats</div>
+            <div class="input-group">
+                <label>رقم الطالب:</label>
+                <input type="text" id="student-id-stats" value="1000001">
+            </div>
+            <button onclick="testGetStats()">عرض الإحصائيات</button>
+            <div id="stats-result"></div>
+        </div>
+
+        <!-- Get Quizzes Test -->
+        <div class="test-section">
+            <h2>7️⃣ عرض الاختبارات (Get Quizzes)</h2>
+            <div class="endpoint">GET http://localhost:8001/api/quizzes</div>
+            <button onclick="testGetQuizzes()">عرض جميع الاختبارات</button>
+            <div id="quizzes-result"></div>
+        </div>
+
+        <!-- Health Check -->
+        <div class="test-section">
+            <h2>✅ فحص حالة الخادم (Health Check)</h2>
+            <div class="endpoint">GET http://localhost:8001/api/health</div>
+            <button onclick="testHealth()">فحص الخادم</button>
+            <div id="health-result"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8001';
+
+        function showResult(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.className = `result ${isError ? 'error' : 'success'}`;
+            element.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        }
+
+        async function testLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                showResult('login-result', data, !response.ok);
+            } catch (error) {
+                showResult('login-result', { error: error.message }, true);
+            }
+        }
+
+        async function testGetGrades() {
+            const studentId = document.getElementById('student-id-grades').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/student/${studentId}/grades`);
+                const data = await response.json();
+                showResult('grades-result', data, !response.ok);
+            } catch (error) {
+                showResult('grades-result', { error: error.message }, true);
+            }
+        }
+
+        async function testGetCourses() {
+            try {
+                const response = await fetch(`${API_BASE}/api/courses`);
+                const data = await response.json();
+                showResult('courses-result', data, !response.ok);
+            } catch (error) {
+                showResult('courses-result', { error: error.message }, true);
+            }
+        }
+
+        async function testGetCoursesByYear(year) {
+            try {
+                const response = await fetch(`${API_BASE}/api/courses?year=${year}`);
+                const data = await response.json();
+                showResult('courses-result', data, !response.ok);
+            } catch (error) {
+                showResult('courses-result', { error: error.message }, true);
+            }
+        }
+
+        async function testRegisterCourse() {
+            const studentId = document.getElementById('student-id-register').value;
+            const courseId = document.getElementById('course-id').value;
+            const groupId = document.getElementById('group-id').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/courses/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ studentId, courseId, groupId })
+                });
+
+                const data = await response.json();
+                showResult('register-result', data, !response.ok);
+            } catch (error) {
+                showResult('register-result', { error: error.message }, true);
+            }
+        }
+
+        async function testCalculatePayment() {
+            const gpa = parseFloat(document.getElementById('gpa').value);
+
+            try {
+                const response = await fetch(`${API_BASE}/api/payment/calculate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gpa })
+                });
+
+                const data = await response.json();
+                showResult('payment-result', data, !response.ok);
+            } catch (error) {
+                showResult('payment-result', { error: error.message }, true);
+            }
+        }
+
+        async function testGetStats() {
+            const studentId = document.getElementById('student-id-stats').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/student/${studentId}/stats`);
+                const data = await response.json();
+                showResult('stats-result', data, !response.ok);
+            } catch (error) {
+                showResult('stats-result', { error: error.message }, true);
+            }
+        }
+
+        async function testGetQuizzes() {
+            try {
+                const response = await fetch(`${API_BASE}/api/quizzes`);
+                const data = await response.json();
+                showResult('quizzes-result', data, !response.ok);
+            } catch (error) {
+                showResult('quizzes-result', { error: error.message }, true);
+            }
+        }
+
+        async function testHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/api/health`);
+                const data = await response.json();
+                showResult('health-result', data, !response.ok);
+            } catch (error) {
+                showResult('health-result', { error: error.message }, true);
+            }
+        }
+
+        // Auto-test health on load
+        window.addEventListener('load', () => {
+            testHealth();
+        });
+    </script>
+</body>
+</html>

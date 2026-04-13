@@ -1,0 +1,165 @@
+/* ===============================
+   Mobile (phones)
+================================ */
+@media (max-width: 640px) {
+
+  /* الكونتينر الأساسي */
+  .container-Table {
+    width: 100% !important;
+    margin: auto !important;
+    font-size: 1em !important;
+     margin-top: 7em !important;
+  }
+
+  /* الهيدر + الكارت */
+  .container-Table > div:first-child {
+    flex-direction: column;
+    align-items: center;
+    gap: 2em;
+    margin-top: 4em !important;
+  }
+
+  /* عنوان الصفحة */
+  .container-Table h1 {
+    text-align: center;
+    font-size: 1.8em !important;
+  }
+
+  /* كارت الطالب */
+  .container-Table .bg-white {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0.1rem !important;
+  }
+
+  /* كروت الملخص */
+  .container-Table .grid {
+    grid-template-columns: 2 !important;
+    gap: 1em;
+  }
+
+  /* قسم الفصول */
+  .container-Table > div:nth-of-type(2) {
+    width: 100% !important;
+    padding: 0.5em !important;
+  }
+
+  /* زر الطباعة */
+  .btn-print button {
+    padding: 0.5rem 1.5rem !important;
+    font-size: 14px;
+  }
+  .title-degree h2{
+    width: 15em !important;
+    font-size: 1.3em !important;
+
+  }
+  .container-Gpa {
+    width: 10em !important;
+  }
+}
+
+
+/* ===============================
+   Small Tablets
+================================ */
+@media (min-width: 641px) and (max-width: 1024px) {
+
+  .container-Table {
+    width: 100% !important;
+    padding-left: 1.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+
+  .container-Table > div:first-child {
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  .container-Table h1 {
+    text-align: center;
+    font-size: 2.5em !important;
+  }
+
+  .container-Table .bg-white {
+    max-width: 58em !important;
+  }
+
+  .container-Table > div:nth-of-type(2) {
+    width: 100% !important;
+  }
+}
+
+
+
+
+
+
+
+
+/* ===============================
+   Table Scroll Container
+================================ */
+.Table_course-container {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* لو عايز Scroll رأسي كمان */
+.Table-Dgree {
+  max-height: 65vh;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+/* ===============================
+   Scrollbar (Chrome, Edge, Safari)
+================================ */
+.Table_course-container::-webkit-scrollbar,
+.Table-Dgree::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+  -webkit-appearance: none;
+}
+
+.Table_course-container::-webkit-scrollbar-track,
+.Table-Dgree::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.Table_course-container::-webkit-scrollbar-thumb,
+.Table-Dgree::-webkit-scrollbar-thumb {
+  background: #05ADCF;
+  border-radius: 8px;
+}
+
+.Table_course-container::-webkit-scrollbar-thumb:hover,
+.Table-Dgree::-webkit-scrollbar-thumb:hover {
+  background: #0489a8;
+}
+
+.Table_course-container::-webkit-scrollbar-button,
+.Table-Dgree::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+  -webkit-appearance: none;
+}
+
+/* ===============================
+   Firefox
+================================ */
+.Table_course-container,
+.Table-Dgree {
+  scrollbar-width: thin;
+  scrollbar-color: #05ADCF transparent;
+}
+ 
+
+
+@media (max-width: 640px) {
+  .Table-Dgree {
+    max-height: 55vh;
+  }
+}

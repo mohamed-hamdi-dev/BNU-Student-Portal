@@ -1,0 +1,152 @@
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.dot-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.dot-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.campus-marker {
+  cursor: pointer;
+}
+
+.campus-marker:hover {
+  transform: scale(1.08) !important;
+}
+
+.campus-marker:hover .campus-marker-ring {
+  opacity: 1 !important;
+}
+
+.campus-chatbot-root .chatbot-history-overlay.chatbot-history-overlay--open {
+  background-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+/* Dark-mode harmonization for chatbot surfaces */
+html[data-theme="dark"] .campus-chatbot-root .bg-white,
+html[data-theme="dark"] .campus-chatbot-root .bg-gray-50,
+html[data-theme="dark"] .campus-chatbot-root .bg-slate-50,
+html[data-theme="dark"] .campus-chatbot-root .bg-slate-100,
+html[data-theme="dark"] .campus-chatbot-root .bg-white\/95,
+html[data-theme="dark"] .campus-chatbot-root .bg-white\/90,
+html[data-theme="dark"] .campus-chatbot-root .bg-white\/80,
+html[data-theme="dark"] .campus-chatbot-root .bg-white\/55 {
+  background-color: #0f223d !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .border-slate-200,
+html[data-theme="dark"] .campus-chatbot-root .border-slate-100,
+html[data-theme="dark"] .campus-chatbot-root .border-gray-200 {
+  border-color: #2a4264 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .text-slate-900,
+html[data-theme="dark"] .campus-chatbot-root .text-slate-800,
+html[data-theme="dark"] .campus-chatbot-root .text-gray-800 {
+  color: #e6eff8 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .text-slate-700,
+html[data-theme="dark"] .campus-chatbot-root .text-slate-600,
+html[data-theme="dark"] .campus-chatbot-root .text-slate-500,
+html[data-theme="dark"] .campus-chatbot-root .text-gray-600,
+html[data-theme="dark"] .campus-chatbot-root .text-gray-500 {
+  color: #a9bdd3 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root input,
+html[data-theme="dark"] .campus-chatbot-root textarea {
+  background-color: #102544 !important;
+  color: #e6eff8 !important;
+  border-color: #2a4264 !important;
+}
+
+/* Dedicated dark theme skin for chat core surfaces */
+html[data-theme="dark"] .campus-chatbot-root .chatbot-window {
+  background: rgba(10, 25, 44, 0.95) !important;
+  border-color: #2a4f76 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-main-panel {
+  background: #0d2038 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-tabbar {
+  background: rgba(12, 31, 53, 0.92) !important;
+  border-top-color: #2a4f76 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-chat-header {
+  background: rgba(14, 35, 58, 0.75) !important;
+  border-bottom-color: #2a4f76 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-chat-scroll {
+  background: linear-gradient(180deg, #0e243f 0%, #0b1e34 100%) !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-chat-composer {
+  background: #0d223a !important;
+  border-top-color: #2a4f76 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-history-drawer {
+  background: #0f2742 !important;
+  border-left-color: #2a4f76 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-history-panel,
+.dark .campus-chatbot-root .chatbot-history-panel {
+  background: linear-gradient(180deg, #0f2742 0%, #0b1f36 100%) !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-bubble-bot,
+html[data-theme="dark"] .campus-chatbot-root .chatbot-loading-bubble {
+  background: #132f4f !important;
+  border-color: #2e547b !important;
+  color: #e6eff8 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-bubble-user {
+  box-shadow: 0 8px 18px rgba(5, 173, 207, 0.3) !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-history-overlay.chatbot-history-overlay--open {
+  background-color: rgba(2, 8, 20, 0.08) !important;
+}
+
+/* Header actions: soften dark-mode icon blocks */
+html[data-theme="dark"] .campus-chatbot-root .chatbot-header-action,
+.dark .campus-chatbot-root .chatbot-header-action {
+  background: rgba(6, 28, 50, 0.42) !important;
+  border: 1px solid rgba(166, 219, 243, 0.22) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-header-action:hover,
+.dark .campus-chatbot-root .chatbot-header-action:hover {
+  background: rgba(8, 40, 70, 0.58) !important;
+  border-color: rgba(166, 219, 243, 0.35) !important;
+}
+
+/* Keep delete action clearly red in dark mode */
+html[data-theme="dark"] .campus-chatbot-root .chatbot-history-delete,
+.dark .campus-chatbot-root .chatbot-history-delete {
+  color: #fb7185 !important;
+}
+
+html[data-theme="dark"] .campus-chatbot-root .chatbot-history-delete:hover,
+.dark .campus-chatbot-root .chatbot-history-delete:hover {
+  color: #fecdd3 !important;
+  background: rgba(225, 29, 72, 0.24) !important;
+  border-color: rgba(251, 113, 133, 0.45) !important;
+}

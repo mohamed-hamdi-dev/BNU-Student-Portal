@@ -1,0 +1,572 @@
+﻿@import "tailwindcss";
+
+/* =============================================================== */
+
+html{
+
+    overflow-x: hidden;
+}
+
+*{
+
+ box-sizing: border-box;
+
+
+
+}
+body{
+    padding: 0;
+    margin: 0;
+  font-weight: 400;
+  font-style: normal;
+    background-color: var(--page-bg);
+    color: var(--page-text);
+    transition: background-color 0.35s ease, color 0.35s ease;
+}
+
+:root {
+  /* Primary Brand */
+  --primary: #05ADCF;
+  --primary-light: #3CCFEA;
+  --primary-lighter: #8BE7F5;
+  --primary-dark: #0288A3;
+  --primary-darker: #015C6F;
+
+  /* Secondary */
+  --secondary-1: #34E3B7;
+  --secondary-2: #6FD7FF;
+  --secondary-3: #0097A7;
+
+  /* Neutral */
+  --white: #FFFFFF;
+  --off-white: #F5F8FA;
+  --gray-light: #f3f4f6;
+  --gray-medium: #AEB7C1;
+  --gray-dark: #4A4F53;
+  --black: #101213;
+  --page-bg: #F5F8FA;
+  --page-text: #101213;
+  --card-bg: #FFFFFF;
+  --muted-text: #4A4F53;
+
+  
+}
+html[data-theme="dark"] {
+  --page-bg: #0b1730;
+  --page-text: #E2E8F0;
+  --card-bg: #13233f;
+  --muted-text: #94A3B8;
+}
+
+/* Global dark-mode bridge for legacy hardcoded Tailwind utility classes */
+html[data-theme="dark"] body {
+  background: var(--page-bg);
+  color: var(--page-text);
+}
+
+html[data-theme="dark"] #root {
+  background: var(--page-bg) !important;
+  color: var(--page-text);
+}
+
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] .bg-gray-50,
+html[data-theme="dark"] .bg-gray-100,
+html[data-theme="dark"] .bg-slate-50,
+html[data-theme="dark"] .bg-slate-100 {
+  background-color: var(--card-bg) !important;
+}
+
+html[data-theme="dark"] [class*="bg-white/"],
+html[data-theme="dark"] [class*="bg-gray-"],
+html[data-theme="dark"] [class*="bg-slate-"] {
+  background-color: var(--card-bg) !important;
+}
+
+/* Catch hardcoded light arbitrary Tailwind colors used as page wrappers */
+html[data-theme="dark"] [class*="bg-[#F8FAFC]"],
+html[data-theme="dark"] [class*="bg-[#f8fafc]"],
+html[data-theme="dark"] [class*="bg-[#F5F8FA]"],
+html[data-theme="dark"] [class*="bg-[#f5f8fa]"],
+html[data-theme="dark"] [class*="bg-[#f3f4f6]"] {
+  background-color: var(--page-bg) !important;
+}
+
+/* Full-screen layout containers should inherit dark page background */
+html[data-theme="dark"] .min-h-screen,
+html[data-theme="dark"] .h-screen {
+  background-color: var(--page-bg);
+}
+
+html[data-theme="dark"] .text-black,
+html[data-theme="dark"] .text-gray-900,
+html[data-theme="dark"] .text-gray-800,
+html[data-theme="dark"] .text-gray-700,
+html[data-theme="dark"] .text-slate-900,
+html[data-theme="dark"] .text-slate-800,
+html[data-theme="dark"] .text-slate-700 {
+  color: var(--page-text) !important;
+}
+
+html[data-theme="dark"] .text-gray-600,
+html[data-theme="dark"] .text-gray-500,
+html[data-theme="dark"] .text-gray-400,
+html[data-theme="dark"] .text-slate-600,
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-400 {
+  color: var(--muted-text) !important;
+}
+
+html[data-theme="dark"] .border-gray-50,
+html[data-theme="dark"] .border-gray-100,
+html[data-theme="dark"] .border-gray-200,
+html[data-theme="dark"] .border-gray-300,
+html[data-theme="dark"] .border-slate-100,
+html[data-theme="dark"] .border-slate-200,
+html[data-theme="dark"] .border-slate-300 {
+  border-color: #2a4264 !important;
+}
+
+html[data-theme="dark"] .shadow,
+html[data-theme="dark"] .shadow-sm,
+html[data-theme="dark"] .shadow-md,
+html[data-theme="dark"] .shadow-lg,
+html[data-theme="dark"] .shadow-xl {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.26) !important;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  background-color: #0f223d !important;
+  color: var(--page-text) !important;
+  border-color: #2a4264 !important;
+}
+
+/* Auth forms keep their own field styling (avoid forced blue fill) */
+html[data-theme="dark"] .forget-page input,
+html[data-theme="dark"] .forget-page textarea,
+html[data-theme="dark"] .forget-page select {
+  background-color: transparent !important;
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder {
+  color: var(--muted-text) !important;
+}
+
+html[data-theme="dark"] .hover\:bg-gray-50:hover,
+html[data-theme="dark"] .hover\:bg-gray-100:hover,
+html[data-theme="dark"] .hover\:bg-slate-50:hover,
+html[data-theme="dark"] .hover\:bg-slate-100:hover {
+  background-color: #1b3457 !important;
+}
+/* ================================================== */
+
+.formik-login-container  {
+  padding-inline: 2em;
+  padding-top: 4em;
+  padding-left: 3.75em;
+}
+
+
+
+.img-banner {
+  width: 100%;
+  height: 250px; 
+  object-fit: cover;
+}
+
+
+
+
+
+@media (min-width: 640px) {
+  .img-banner {
+    height: 4em;
+  }
+}
+
+
+@media (max-width: 828px) {
+  .img-banner {
+       height: 49em;
+  }
+}
+
+
+@media (min-width: 1024px) {
+  .img-banner {
+    height: 77em;
+  }
+}
+
+
+@media (min-width: 1280px) {
+  .img-banner {
+       height: 55em;
+  }
+}
+@media (max-width: 857px) {
+  .img-banner {
+    height:52em;
+  }
+}
+@media (max-width: 1800px) {
+  .img-banner {
+    height:52em;
+  }
+}
+
+
+
+
+
+/* ==================================================== */
+/* input login wekit */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0px 1000px transparent inset !important;
+    box-shadow: 0 0 0px 1000px transparent inset !important;
+    -webkit-text-fill-color: white !important;
+    transition: background-color 9999s ease-in-out 0s;
+}
+
+
+
+
+
+/* ============================================================================ */
+/* Scrole menu togel */
+
+/* Scrollbar style inside menu */
+.menu-scroll::-webkit-scrollbar {
+  width: 7px; /* عرض الاسكرول */
+  
+}
+
+.menu-scroll::-webkit-scrollbar-track {
+  background: #f0f0f0; /* لون خلفية المسار */
+  border-radius: 20px;
+}
+
+.menu-scroll::-webkit-scrollbar-thumb {
+  background: #05ADCF; /* اللون اللي انت عايزه */
+  border-radius: 10px;
+}
+
+.menu-scroll::-webkit-scrollbar-thumb:hover {
+  background: #0487a3; /* لما تقرب عليه */
+}
+/* ================================================= */
+/* ============================================================================ */
+
+
+/* Scrollbar style inside page*/
+.menu-scroll-page::-webkit-scrollbar {
+  width: 6px; 
+
+}
+
+.menu-scroll-page::-webkit-scrollbar-track {
+  background: #cbc7c7; /* لون خلفية المسار */
+  border-radius: 10px;
+}
+
+.menu-scroll-page::-webkit-scrollbar-thumb {
+  background: #05ADCF; /* اللون اللي انت عايزه */
+  border-radius: 10px;
+}
+
+.menu-scroll-page:-webkit-scrollbar-thumb:hover {
+  background: #0487a3; /* لما تقرب عليه */
+}
+/* ================================================= */
+
+/* ================================================= */
+/* Admin Chat Dashboard scrollbar (scoped only here) */
+.admin-chat-page * {
+  scrollbar-width: thin;
+  scrollbar-color: #ffffff #ffffff;
+}
+
+.admin-chat-page ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.admin-chat-page ::-webkit-scrollbar-track {
+  background: #ffffff;
+  border-radius: 999px;
+  border: 0;
+}
+
+.admin-chat-page ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #36d7ef 0%, #10b8d8 100%);
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(16, 184, 216, 0.22), 0 6px 14px rgba(16, 184, 216, 0.16);
+}
+
+.admin-chat-page ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #52e3f7 0%, #1dc6e2 100%);
+}
+
+.admin-chat-page ::-webkit-scrollbar-corner {
+  background: #ffffff;
+}
+
+html[data-theme="dark"] .admin-chat-page * {
+  scrollbar-color: #10b8d8 #132a49;
+}
+
+html[data-theme="dark"] .admin-chat-page ::-webkit-scrollbar-track {
+  background: linear-gradient(180deg, #112741 0%, #0f223b 100%);
+  border: 1px solid #244569;
+}
+
+html[data-theme="dark"] .admin-chat-page ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #1cd0eb 0%, #0ea8c7 100%);
+  border: 2px solid #112741;
+  box-shadow: 0 0 0 1px rgba(28, 208, 235, 0.22), 0 6px 14px rgba(6, 43, 70, 0.35);
+}
+
+html[data-theme="dark"] .admin-chat-page ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #39ddf3 0%, #11b7d5 100%);
+}
+
+html[data-theme="dark"] .admin-chat-page ::-webkit-scrollbar-corner {
+  background: #112741;
+}
+/* ================================================= */
+
+/* ================================================= */
+/* Course Management soft scrollbar */
+.cm-soft-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #11b7d5 rgba(6, 26, 46, 0.22);
+}
+
+.cm-soft-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.cm-soft-scroll::-webkit-scrollbar-track {
+  background: rgba(11, 37, 64, 0.14);
+  border-radius: 999px;
+}
+
+.cm-soft-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #2cd7ef 0%, #0daecc 100%);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.cm-soft-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #4ae1f6 0%, #12c0df 100%);
+}
+
+html[data-theme="dark"] .cm-soft-scroll {
+  scrollbar-color: #19c7e4 #152c49;
+}
+
+html[data-theme="dark"] .cm-soft-scroll::-webkit-scrollbar-track {
+  background: linear-gradient(180deg, #112741 0%, #0f223b 100%);
+  border: 1px solid #27496f;
+}
+
+html[data-theme="dark"] .cm-soft-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #24d6ef 0%, #0fb2d1 100%);
+  border: 2px solid #10243f;
+  box-shadow: 0 0 0 1px rgba(36, 214, 239, 0.2);
+}
+/* ================================================= */
+
+
+
+@keyframes pulse-slow {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 1s infinite ease-in-out;
+}
+
+/* =============================================================print */
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  #bnu-transcript-wrapper {
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  #transcript-content {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    margin: 0 auto !important;
+    padding: 10mm !important;
+    box-shadow: none !important;
+  }
+}
+@media print {
+  #bnu-transcript-wrapper {
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  #transcript-content {
+    padding: 10mm !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+}
+/* ✅ شاشة الموبايل فقط: صغّر الورقة لتناسب الشاشة */
+@media screen and (max-width: 768px) {
+  #bnu-transcript-wrapper {
+    width: 100% !important;
+    padding: 1em !important;
+    justify-content: center !important;
+  }
+
+  /* الورقة A4 تفضل 210mm لكن نعملها Scale */
+  #transcript-content.screen-fit {
+    transform: scale(0.70);
+    transform-origin: top center;
+    margin-top: 1em;
+  }
+
+  /* عشان مايحصلش قص بسبب الـ transform */
+  #bnu-transcript-wrapper {
+    overflow: visible !important;
+  }
+}
+
+/* ============================================================= */
+/* Unified SweetAlert2 Theme (toast + modal) */
+.swal2-container {
+  z-index: 2200;
+}
+
+.swal2-popup {
+  border-radius: 1.1rem !important;
+  border: 1px solid rgba(34, 199, 242, 0.22) !important;
+  background: rgba(244, 250, 255, 0.95) !important;
+  color: #19324b !important;
+  box-shadow: 0 20px 45px rgba(12, 31, 53, 0.18), 0 6px 16px rgba(34, 199, 242, 0.12) !important;
+  backdrop-filter: blur(10px);
+}
+
+.swal2-title {
+  color: #12324c !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em;
+}
+
+.swal2-html-container {
+  color: #2f4c66 !important;
+}
+
+.swal2-popup .swal2-styled:focus-visible {
+  box-shadow: 0 0 0 4px rgba(34, 199, 242, 0.16) !important;
+}
+
+.swal2-confirm.swal2-styled {
+  background: #22c7f2 !important;
+  color: #ffffff !important;
+  border-radius: 0.75rem !important;
+  font-weight: 700 !important;
+}
+
+.swal2-confirm.swal2-styled:hover {
+  background: #14b8e4 !important;
+}
+
+.swal2-cancel.swal2-styled {
+  background: #e7eef5 !important;
+  color: #26435d !important;
+  border-radius: 0.75rem !important;
+  font-weight: 700 !important;
+}
+
+.swal2-popup.swal2-toast {
+  border-radius: 0.95rem !important;
+  border: 1px solid rgba(34, 199, 242, 0.24) !important;
+  background: rgba(239, 247, 255, 0.94) !important;
+  color: #17324b !important;
+  box-shadow: 0 14px 30px rgba(9, 27, 44, 0.16), 0 4px 12px rgba(34, 199, 242, 0.1) !important;
+  padding: 0.72rem 0.85rem !important;
+}
+
+.swal2-popup.swal2-toast .swal2-title {
+  color: #17324b !important;
+  font-size: 0.96rem !important;
+  font-weight: 700 !important;
+}
+
+.swal2-timer-progress-bar {
+  background: rgba(34, 199, 242, 0.55) !important;
+}
+
+html[data-theme="dark"] .swal2-popup {
+  border: 1px solid rgba(34, 199, 242, 0.28) !important;
+  background: rgba(14, 28, 48, 0.94) !important;
+  color: #d7e8f7 !important;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34), 0 8px 22px rgba(34, 199, 242, 0.16) !important;
+}
+
+html[data-theme="dark"] .swal2-title {
+  color: #e5f3ff !important;
+}
+
+html[data-theme="dark"] .swal2-html-container {
+  color: #b9d0e5 !important;
+}
+
+html[data-theme="dark"] .swal2-cancel.swal2-styled {
+  background: #263a52 !important;
+  color: #d7e8f7 !important;
+}
+
+html[data-theme="dark"] .swal2-popup.swal2-toast {
+  border: 1px solid rgba(34, 199, 242, 0.3) !important;
+  background: rgba(12, 24, 41, 0.95) !important;
+  color: #deedfb !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.33), 0 6px 16px rgba(34, 199, 242, 0.14) !important;
+}
+
+html[data-theme="dark"] .swal2-popup.swal2-toast .swal2-title {
+  color: #deedfb !important;
+}
+
+/* Prevent double-eye icon in password fields (browser reveal + app reveal). */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+input[type="password"]::-webkit-credentials-auto-fill-button,
+input[type="password"]::-webkit-textfield-decoration-container {
+  visibility: hidden;
+  pointer-events: none;
+}

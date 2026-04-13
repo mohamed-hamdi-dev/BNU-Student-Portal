@@ -1,0 +1,30 @@
+
+
+
+ul, ol {
+  list-style: none;
+}
+
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+.container1 {
+padding-inline:5em ;
+padding-block: 8em;
+
+}
+
+
+.container1 {
+padding-inline:5em ;
+padding-block: 8em;
+
+}
+
+.container2 {
+padding-inline:8em ;
+padding-block: 8em;
+
+}
