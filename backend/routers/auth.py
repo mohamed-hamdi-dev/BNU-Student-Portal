@@ -85,21 +85,21 @@ def ensure_auth_security_schema(db: Session) -> None:
             db.execute(text(stmt))
         except Exception:
             # Ignore duplicate/add errors to keep login resilient.
-            pass
+            db.rollback()
 
     # Fill nullable timestamps for stricter response schema expectations.
     try:
         db.execute(text("UPDATE users SET created_at = NOW() WHERE created_at IS NULL"))
     except Exception:
-        pass
+        db.rollback()
     try:
         db.execute(text("UPDATE users SET updated_at = NOW() WHERE updated_at IS NULL"))
     except Exception:
-        pass
+        db.rollback()
     try:
         db.execute(text("UPDATE users SET password_history_json = '[]' WHERE password_history_json IS NULL"))
     except Exception:
-        pass
+        db.rollback()
 
     try:
         db.commit()
@@ -351,7 +351,11 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
     # Enrich login payload with per-user contact settings so frontend can show
     # display name immediately in navbar/toggle without waiting for another screen sync.
-    contact_settings = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    try:
+        contact_settings = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    except Exception:
+        db.rollback()
+        contact_settings = None
     resolved_display_name = (contact_settings.display_name if contact_settings and contact_settings.display_name else user.full_name)
     resolved_recovery_email = (contact_settings.recovery_email if contact_settings and contact_settings.recovery_email else user.email)
     resolved_phone = (contact_settings.phone_number if contact_settings else None)
