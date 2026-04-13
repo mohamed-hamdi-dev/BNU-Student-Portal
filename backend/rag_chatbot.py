@@ -756,9 +756,15 @@ class RAGChatbot:
         has_context = bool(docs)
 
         if not has_context:
+            fallback_answer = (
+                "لا تتوفر مصادر معرفة مفعلة الآن للإجابة الدقيقة على هذا السؤال. "
+                "حاول مرة أخرى لاحقًا أو تواصل مع المسؤول لتفعيل مصادر النظام."
+            )
             sources = []
+            self.conversations[conversation_id].append({"role": "assistant", "content": fallback_answer})
+            self._trim_conversation_messages(conversation_id)
             return {
-                "answer": None,
+                "answer": fallback_answer,
                 "conversation_id": conversation_id,
                 "sources": sources,
                 "retrieved_docs": [],
