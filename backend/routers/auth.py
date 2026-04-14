@@ -285,4 +285,268 @@ def _send_student_credentials_email(email: str, username: str, password: str) ->
     )
 
 
+# ── 1. Login (JWT) ────────────────────────────────────────────────────
+@router.post("/login", response_model=Token)
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user and return a JWT token with profile data."""
+    ensure_auth_security_schema(db)
+
+    user = db.query(User).filter(
+        or_(
+            User.username == request.username,
+            User.email == request.username,
+            User.student_code == request.username,
+        )
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+
+    if not verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated")
+
+    must_change_password = bool(getattr(user, "must_change_password", False))
+    password_expired = bool(_is_password_expired(user))
+    must_change_effective = bool(must_change_password or password_expired)
+
+    access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    token = create_access_token(data={"sub": str(user.id)}, expires_delta=access_token_expires)
+    safe_user = _safe_user_profile_payload(user)
+
+    try:
+        contact_settings = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    except Exception:
+        db.rollback()
+        contact_settings = None
+
+    resolved_display_name = contact_settings.display_name if contact_settings and contact_settings.display_name else user.full_name
+    resolved_recovery_email = contact_settings.recovery_email if contact_settings and contact_settings.recovery_email else user.email
+    resolved_phone = contact_settings.phone_number if contact_settings else None
+    safe_user["display_name"] = resolved_display_name
+    safe_user["displayName"] = resolved_display_name
+    safe_user["recovery_email"] = resolved_recovery_email
+    safe_user["phone_number"] = resolved_phone
+    safe_user["must_change_password"] = must_change_effective
+    safe_user["password_expired"] = password_expired
+    safe_user["password_expires_at"] = _password_expires_at(user)
+    safe_user["password_policy_days"] = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+
+    return Token(access_token=token, token_type="bearer", user=safe_user)
+
+
+# ── 2. Request OTP (Forgot Password) ──────────────────────────────────
+@router.post("/forgot-password")
+async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
+    """Generate and send an OTP to the user's registered email."""
+    submitted_aff_no = str(body.student_code or "").strip()
+    submitted_national_id = str(body.national_id or "").strip()
+    submitted_email = str(body.email or "").strip().lower()
+    if not submitted_aff_no or not submitted_national_id:
+        raise HTTPException(status_code=400, detail="Invalid recovery data")
+
+    user = db.query(User).filter(User.national_id == submitted_national_id).filter(
+        or_(
+            User.username == submitted_aff_no,
+            User.student_code == submitted_aff_no,
+        )
+    ).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid recovery data")
+
+    user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    recovery_email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").strip().lower()
+    if not recovery_email or submitted_email != recovery_email:
+        raise HTTPException(status_code=400, detail="Invalid recovery data")
+
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    material = f"{recovery_email}|{otp_code}|{settings.OTP_SECRET}".encode("utf-8")
+    import hashlib
+    otp_hash = hashlib.sha256(material).hexdigest()
+
+    expiry = datetime.now(timezone.utc) + timedelta(seconds=settings.OTP_TTL_SECONDS)
+    db_otp = OTPModel(
+        user_id=user.id,
+        otp_hash=otp_hash,
+        purpose="password_reset",
+        expires_at=expiry,
+    )
+    db.add(db_otp)
+    db.commit()
+    db.refresh(db_otp)
+
+    dev_otp = None
+    try:
+        await _send_otp_email(recovery_email, otp_code)
+    except Exception:
+        # Keep the flow usable in development when SMTP/API delivery is unavailable.
+        dev_otp = otp_code
+
+    response = {
+        "message": "If the email is registered, an OTP will be sent",
+        "request_id": str(db_otp.id),
+        "expires_in_sec": settings.OTP_TTL_SECONDS,
+    }
+    if dev_otp:
+        response["dev_otp"] = dev_otp
+    return response
+
+
+# ── 3. Verify OTP ─────────────────────────────────────────────────────
+@router.post("/verify-otp")
+async def verify_otp(body: OTPVerify, db: Session = Depends(get_db)):
+    """Check if the provided OTP is valid and unexpired."""
+    try:
+        req_id = int(body.request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
+    record = db.query(OTPModel).filter(OTPModel.id == req_id).first()
+    if not record or record.is_used:
+        raise HTTPException(status_code=400, detail="Invalid or used request ID")
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    if datetime.now(timezone.utc) > record.expires_at:
+        raise HTTPException(status_code=400, detail="OTP expired")
+
+    if record.attempts >= settings.OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=400, detail="Too many attempts")
+
+    user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").lower()
+    material = f"{email}|{body.otp}|{settings.OTP_SECRET}".encode("utf-8")
+    import hashlib
+    computed_hash = hashlib.sha256(material).hexdigest()
+
+    if computed_hash != record.otp_hash:
+        record.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    record.is_used = True
+    db.commit()
+    return {"verified": True}
+
+
+# ── 4. Reset Password (with OTP) ──────────────────────────────────────
+@router.post("/reset-password")
+async def reset_password(body: ResetPassword, db: Session = Depends(get_db)):
+    """Reset the password using a previously verified OTP request ID."""
+    try:
+        req_id = int(body.request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
+    record = db.query(OTPModel).filter(OTPModel.id == req_id).first()
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").lower()
+    material = f"{email}|{body.otp}|{settings.OTP_SECRET}".encode("utf-8")
+    import hashlib
+    computed_hash = hashlib.sha256(material).hexdigest()
+
+    if computed_hash != record.otp_hash:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    current_hash = str(user.password_hash or "")
+    if verify_password(body.new_password, current_hash):
+        raise HTTPException(status_code=400, detail="New password cannot be the same as current password")
+    history = _load_password_history(user)
+    if any(verify_password(body.new_password, old_hash) for old_hash in history):
+        raise HTTPException(status_code=400, detail="New password was used recently")
+
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    user.password_changed_at = datetime.now(timezone.utc)
+    _save_password_history(user, [user.password_hash, current_hash, *history])
+    record.is_used = True
+    db.commit()
+    return {"message": "Password reset successfully"}
+
+
+# ── 5. Change Password (Logged In) ────────────────────────────────────
+@router.post("/change-password")
+async def change_password(
+    body: ChangePassword,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change password for an authenticated user."""
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Incorrect current password")
+
+    if verify_password(body.new_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="New password cannot be the same as current password")
+
+    history = _load_password_history(current_user)
+    if any(verify_password(body.new_password, old_hash) for old_hash in history):
+        raise HTTPException(status_code=400, detail="New password was used recently")
+
+    previous_hash = str(current_user.password_hash or "")
+    current_user.password_hash = hash_password(body.new_password)
+    current_user.must_change_password = False
+    current_user.password_changed_at = datetime.now(timezone.utc)
+    _save_password_history(current_user, [current_user.password_hash, previous_hash, *history])
+    db.commit()
+    return {"message": "Password changed successfully"}
+
+
+@router.post("/account-request")
+async def create_account_request(body: AccountRequestCreate, db: Session = Depends(get_db)):
+    full_name = str(body.full_name or "").strip()
+    email = str(body.email or "").strip().lower()
+    college = str(body.college or "").strip()
+    level = str(body.level or "").strip()
+    national_id_digits = _digits_only(body.national_id or "")
+
+    if len(full_name.split()) < 4:
+        raise HTTPException(status_code=400, detail="Full name must be 4 parts")
+    if len(national_id_digits) != 14:
+        raise HTTPException(status_code=400, detail="National ID must be 14 digits")
+
+    existing = db.query(User).filter(or_(User.email == email, User.national_id == national_id_digits)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Account already exists for this email or national ID")
+
+    existing_pending = (
+        db.query(AccountRequest)
+        .filter(
+            AccountRequest.status == "pending",
+            or_(AccountRequest.email == email, AccountRequest.national_id == national_id_digits),
+        )
+        .first()
+    )
+    if existing_pending:
+        raise HTTPException(status_code=400, detail="There is already a pending request for this email or national ID")
+
+    request_row = AccountRequest(
+        full_name=full_name,
+        national_id=national_id_digits,
+        college=college,
+        level=level,
+        email=email,
+        status="pending",
+    )
+    db.add(request_row)
+    db.commit()
+    db.refresh(request_row)
+
+    return {
+        "message": "Account request submitted successfully and is pending admin review",
+        "request_id": request_row.id,
+        "status": request_row.status,
+    }
+
+
 
