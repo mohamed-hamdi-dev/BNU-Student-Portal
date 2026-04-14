@@ -377,20 +377,17 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_otp)
 
-    dev_otp = None
     try:
         await _send_otp_email(recovery_email, otp_code)
-    except Exception:
-        # Keep the flow usable in development when SMTP/API delivery is unavailable.
-        dev_otp = otp_code
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OTP email delivery failed") from exc
 
     response = {
         "message": "If the email is registered, an OTP will be sent",
         "request_id": str(db_otp.id),
         "expires_in_sec": settings.OTP_TTL_SECONDS,
     }
-    if dev_otp:
-        response["dev_otp"] = dev_otp
     return response
 
 

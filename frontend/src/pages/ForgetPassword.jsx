@@ -137,10 +137,6 @@ const Basic = () => {
                 expiresInSec: data.expires_in_sec || data.expiresInSec || 300,
             });
             Toast.fire({ icon: "success", title: t("forgot_resend_otp_success"), iconColor: "#05ADCF" });
-            const devOtp = data?.dev_otp || data?.devOtp;
-            if (devOtp) {
-                Toast.fire({ icon: "info", title: `OTP: ${devOtp}`, iconColor: "#05ADCF" });
-            }
         } catch (e) {
             Toast.fire({ icon: "error", title: mapRecoveryErrorMessage(e.message), iconColor: "#ef4444" });
         } finally {
@@ -233,14 +229,6 @@ const Basic = () => {
                                         title: data.message || "OTP sent",
                                         iconColor: "#05ADCF",
                                     });
-                                    const devOtp = data?.dev_otp || data?.devOtp;
-                                    if (devOtp) {
-                                        Toast.fire({
-                                            icon: "info",
-                                            title: `OTP: ${devOtp}`,
-                                            iconColor: "#05ADCF",
-                                        });
-                                    }
                                     setRequestMeta({
                                         requestId,
                                         email: values.mail,
