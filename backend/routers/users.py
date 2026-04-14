@@ -4,14 +4,12 @@ Handles CRUD logic for users. Requires admin role for listing/modifying others.
 """
 
 import json
-import smtplib
 import secrets
 import csv
 import io
 import re
 import zipfile
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 from pathlib import Path
 from typing import List
 from uuid import uuid4
@@ -25,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from core.config import get_settings
+from core.email import send_email
 from core.deps import get_db, get_current_user, require_role, security_scheme
 from core.security import hash_password
 from core.security import decode_access_token
@@ -92,26 +91,16 @@ def _password_expiry_metadata(user: User) -> tuple[bool, datetime | None]:
 
 
 def _send_account_credentials_email(email: str, username: str, temp_password: str) -> None:
-    settings = get_settings()
-    if not settings.MAIL_USERNAME or not settings.MAIL_PASSWORD:
-        # SMTP is not configured in this environment.
-        return
-
-    msg = EmailMessage()
-    msg["Subject"] = "BNU Portal - Temporary Login Credentials"
-    msg["From"] = settings.MAIL_USERNAME
-    msg["To"] = email
-    msg.set_content(
-        "Welcome to BNU Portal.\n\n"
-        f"Username: {username}\n"
-        f"Temporary Password: {temp_password}\n\n"
-        "Please login and change your password immediately."
+    send_email(
+        email,
+        "BNU Portal - Temporary Login Credentials",
+        (
+            "Your account has been created in BNU Portal.\n\n"
+            f"Username: {username}\n"
+            f"Temporary Password: {temp_password}\n\n"
+            "Please login and change your password immediately."
+        ),
     )
-
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
-        server.starttls()
-        server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
-        server.send_message(msg)
 
 
 def _current_academic_start_year(now_value: datetime | None = None) -> int:
