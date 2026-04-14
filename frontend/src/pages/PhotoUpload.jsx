@@ -85,6 +85,7 @@ export default function PhotoUpload() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [serverPhoto, setServerPhoto] = useState(null);
+  const [serverPhotoFailed, setServerPhotoFailed] = useState(false);
   const [message, setMessage] = useState("");
   const [cropX, setCropX] = useState(0);
   const [cropY, setCropY] = useState(0);
@@ -97,6 +98,10 @@ export default function PhotoUpload() {
       return {};
     }
   }, []);
+
+  useEffect(() => {
+    setServerPhotoFailed(false);
+  }, [serverPhoto?.fileUrl]);
 
   useEffect(() => {
     const load = async () => {
@@ -193,6 +198,9 @@ export default function PhotoUpload() {
     : serverPhoto?.status === "rejected"
     ? t("photo_upload_action_upload_replacement")
     : t("photo_upload_action_upload_for_review");
+  const fallbackAvatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || "Student")}&background=05ADCF&color=fff&size=200`;
+  const serverPhotoUrl = withToken(serverPhoto?.fileUrl);
+  const previewImageSrc = cardPreview || (!serverPhotoFailed && serverPhotoUrl) || fallbackAvatarUrl;
 
   return (
     <div
@@ -222,9 +230,16 @@ export default function PhotoUpload() {
               <div className={`mx-auto w-fit rounded-2xl p-2 shadow-sm ${isDarkMode ? "border border-[#2a476e] bg-[#0f2038]" : "border border-slate-200 bg-white"}`}>
                 <div className={`relative h-40 w-32 overflow-hidden rounded-xl ${isDarkMode ? "border border-[#355980] bg-[#0f223d]" : "border border-slate-100 bg-slate-100"}`}>
                   <img
-                    src={cardPreview || withToken(serverPhoto?.fileUrl) || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || "Student")}&background=05ADCF&color=fff&size=200`}
+                    src={previewImageSrc}
                     alt={t("photo_upload_preview_alt")}
                     className="h-full w-full object-contain bg-white"
+                    onError={(event) => {
+                      if (cardPreview) return;
+                      if (event.currentTarget.src !== fallbackAvatarUrl) {
+                        setServerPhotoFailed(true);
+                        event.currentTarget.src = fallbackAvatarUrl;
+                      }
+                    }}
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-900/20 to-transparent p-2 text-[10px] font-bold text-white">
                     BNU ID
