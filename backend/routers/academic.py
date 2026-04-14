@@ -821,8 +821,20 @@ async def get_public_catalog(
     db: Session = Depends(get_db),
 ):
     # Public endpoint for pre-login forms (account request / recovery).
-    state = _get_or_create_state(db)
-    return _serialize_public_catalog(state)
+    try:
+        state = _get_or_create_state(db)
+        return _serialize_public_catalog(state)
+    except Exception:
+        logger.exception("public-catalog fallback triggered")
+        return {
+            "colleges": list(DEFAULT_COLLEGES),
+            "years": [{"id": str(i), "name": f"السنة {i}"} for i in range(1, 6)],
+            "registrationSettings": {
+                "activeAcademicYear": "1",
+                "enforcePrerequisites": True,
+                "enforceMaxHours": True,
+            },
+        }
 
 
 @router.put("/state", response_model=AcademicStateResponse)

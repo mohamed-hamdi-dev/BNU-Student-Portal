@@ -8,7 +8,6 @@ import json
 import smtplib
 from email.message import EmailMessage
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy import text
@@ -131,36 +130,38 @@ def _normalize_theme_value(value: str | None) -> str:
 
 
 def _safe_user_profile_payload(user: User) -> dict:
+    now_utc = datetime.now(timezone.utc)
+    created_at = _to_utc_datetime(getattr(user, "created_at", None)) or now_utc
+    updated_at = _to_utc_datetime(getattr(user, "updated_at", None)) or now_utc
+    payload = {
+        "id": int(getattr(user, "id") or 0),
+        "username": str(getattr(user, "username", "") or ""),
+        "email": str(getattr(user, "email", "") or ""),
+        "full_name": str(getattr(user, "full_name", "") or ""),
+        "role": _normalize_role_value(getattr(user, "role", None)),
+        "student_code": getattr(user, "student_code", None),
+        "admission_year": getattr(user, "admission_year", None),
+        "college": getattr(user, "college", None),
+        "major": getattr(user, "major", None),
+        "level": getattr(user, "level", None),
+        "theme_preference": _normalize_theme_value(getattr(user, "theme_preference", None)),
+        "avatar_size_px": int(getattr(user, "avatar_size_px", 48) or 48),
+        "nationality": getattr(user, "nationality", None),
+        "gender": getattr(user, "gender", None),
+        "birth_place": getattr(user, "birth_place", None),
+        "is_active": bool(getattr(user, "is_active", True)),
+        "national_id": getattr(user, "national_id", None),
+        "must_change_password": bool(getattr(user, "must_change_password", False)),
+        "password_changed_at": _to_utc_datetime(getattr(user, "password_changed_at", None)),
+        "password_expires_at": None,
+        "password_expired": False,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
     try:
-        return UserProfileResponse.model_validate(user).model_dump(mode="json")
-    except ValidationError:
-        now_utc = datetime.now(timezone.utc)
-        fallback_payload = {
-            "id": int(getattr(user, "id")),
-            "username": str(getattr(user, "username", "") or ""),
-            "email": str(getattr(user, "email", "") or ""),
-            "full_name": str(getattr(user, "full_name", "") or ""),
-            "role": _normalize_role_value(getattr(user, "role", None)),
-            "student_code": getattr(user, "student_code", None),
-            "admission_year": getattr(user, "admission_year", None),
-            "college": getattr(user, "college", None),
-            "major": getattr(user, "major", None),
-            "level": getattr(user, "level", None),
-            "theme_preference": _normalize_theme_value(getattr(user, "theme_preference", None)),
-            "avatar_size_px": int(getattr(user, "avatar_size_px", 48) or 48),
-            "nationality": getattr(user, "nationality", None),
-            "gender": getattr(user, "gender", None),
-            "birth_place": getattr(user, "birth_place", None),
-            "is_active": bool(getattr(user, "is_active", True)),
-            "national_id": getattr(user, "national_id", None),
-            "must_change_password": bool(getattr(user, "must_change_password", False)),
-            "password_changed_at": _to_utc_datetime(getattr(user, "password_changed_at", None)),
-            "password_expires_at": None,
-            "password_expired": False,
-            "created_at": _to_utc_datetime(getattr(user, "created_at", None)) or now_utc,
-            "updated_at": _to_utc_datetime(getattr(user, "updated_at", None)) or now_utc,
-        }
-        return UserProfileResponse.model_validate(fallback_payload).model_dump(mode="json")
+        return UserProfileResponse.model_validate(payload).model_dump(mode="json")
+    except Exception:
+        return payload
 
 
 def _load_password_history(user: User) -> list[str]:

@@ -1,7 +1,7 @@
 import React from "react";
 import { Navigate, createBrowserRouter, RouterProvider } from "react-router-dom";
 import LoginPage from "./pages/LoginPage.jsx";
-import Layout from "./layout/Layout.jsx";
+import Layout from "./layout/layout.jsx";
 import ForgetPassword from "./pages/ForgetPassword.jsx";
 import StudentDashboardPage from "./pages/student/StudentDashboardPage.jsx";
 import ErrorPage from "./pages/ErrorPage.jsx";
