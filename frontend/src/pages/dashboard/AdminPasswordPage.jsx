@@ -62,6 +62,7 @@ export default function AdminPasswordPage() {
     const [status, setStatus] = useState(null);
 
     const [avatarUrl, setAvatarUrl] = useState("");
+    const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
     const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
     const [cropOpen, setCropOpen] = useState(false);
     const [cropSource, setCropSource] = useState("");
@@ -91,10 +92,12 @@ export default function AdminPasswordPage() {
             try {
                 const row = await getMyApprovedProfilePhoto();
                 if (!active) return;
+                setAvatarLoadFailed(false);
                 setAvatarUrl(withToken(row?.fileUrl || ""));
             } catch {
                 if (!active) return;
                 setAvatarUrl("");
+                setAvatarLoadFailed(false);
             }
         };
         loadPhoto();
@@ -386,16 +389,22 @@ export default function AdminPasswordPage() {
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_18px_40px_-28px_rgba(15,23,42,.45)] md:p-8">
                 <div className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                     <div className={`flex items-center gap-3 ${isRTL ? "" : "flex-row-reverse"}`}>
-                        <img
-                            src={avatarUrl || currentUser?.profilePhotoUrl || fallbackAvatar}
-                            alt="profile"
-                            className="rounded-2xl border-2 border-white object-cover bg-slate-100 shadow-md"
-                            style={{
-                                width: `${Math.max(56, Math.min(120, Number(avatarSizePx || 48)))}px`,
-                                height: `${Math.max(56, Math.min(120, Number(avatarSizePx || 48)))}px`,
-                                objectPosition: `${Math.max(0, Math.min(100, Number(avatarObjectX || 50)))}% ${Math.max(0, Math.min(100, Number(avatarObjectY || 50)))}%`,
-                            }}
-                        />
+                            <img
+                                src={(avatarLoadFailed ? "" : (avatarUrl || currentUser?.profilePhotoUrl || "")) || fallbackAvatar}
+                                alt="profile"
+                                className="rounded-2xl border-2 border-white object-cover bg-slate-100 shadow-md"
+                                style={{
+                                    width: `${Math.max(56, Math.min(120, Number(avatarSizePx || 48)))}px`,
+                                    height: `${Math.max(56, Math.min(120, Number(avatarSizePx || 48)))}px`,
+                                    objectPosition: `${Math.max(0, Math.min(100, Number(avatarObjectX || 50)))}% ${Math.max(0, Math.min(100, Number(avatarObjectY || 50)))}%`,
+                                }}
+                                onError={(event) => {
+                                    if (event.currentTarget.src !== fallbackAvatar) {
+                                        setAvatarLoadFailed(true);
+                                        event.currentTarget.src = fallbackAvatar;
+                                    }
+                                }}
+                            />
                         <div className={isRTL ? "text-right" : "text-left"}>
                             <p className="text-sm text-slate-500">{t("admin_profile_account_data")}</p>
                             <p className="text-base font-black text-slate-800">{displayName}</p>

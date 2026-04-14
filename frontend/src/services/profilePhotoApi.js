@@ -1,11 +1,21 @@
 import { apiFetch } from "./api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
+
+const normalizeApiBase = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("localhost") || value.startsWith("127.0.0.1")) return `http://${value}`;
+  return `https://${value}`;
+};
+
+const API_BASE = normalizeApiBase(RAW_API_BASE);
 
 export const toAbsoluteFileUrl = (value = "") => {
   if (!value) return "";
   if (value.startsWith("http://") || value.startsWith("https://")) return value;
-  if (value.startsWith("/api/")) return value;
+  if (value.startsWith("/api/")) return `${API_BASE}${value}`;
   const normalizedPath = value.startsWith("/") ? value : `/${value}`;
   let base = API_BASE;
   try {
