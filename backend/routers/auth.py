@@ -379,6 +379,8 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
 
     try:
         await _send_otp_email(recovery_email, otp_code)
+    except HTTPException:
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OTP email delivery failed") from exc

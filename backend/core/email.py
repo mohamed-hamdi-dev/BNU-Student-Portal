@@ -7,6 +7,7 @@ Uses Resend when configured, with an SMTP fallback for local development.
 from __future__ import annotations
 
 import json
+import logging
 import smtplib
 from email.message import EmailMessage
 from urllib import error, request
@@ -14,6 +15,8 @@ from urllib import error, request
 from fastapi import HTTPException
 
 from core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _get_resend_from_address() -> str:
@@ -86,10 +89,11 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: str | Non
     try:
         _send_via_resend(to_email, subject, text_body, html_body)
         return
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Resend delivery failed; falling back to SMTP: %s", exc)
 
     try:
         _send_via_smtp(to_email, subject, text_body, html_body)
     except Exception as exc:
+        logger.exception("SMTP delivery failed")
         raise HTTPException(status_code=503, detail=f"Email delivery failed: {exc}") from exc
