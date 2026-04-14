@@ -2224,12 +2224,12 @@ function MapComponent() {
             url={
               isDarkMode
                 ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                : "https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png"
+                : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             }
             attribution={
               isDarkMode
                 ? '&copy; OpenStreetMap contributors &copy; CARTO'
-                : '&copy; Stadia Maps &copy; OpenMapTiles &copy; OpenStreetMap contributors'
+                : '&copy; OpenStreetMap contributors &copy; CARTO'
             }
             maxZoom={20}
           />
