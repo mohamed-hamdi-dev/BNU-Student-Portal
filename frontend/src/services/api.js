@@ -1,19 +1,34 @@
 // Centralized API Client for FastAPI Backend
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
+function normalizeApiBase(rawBase) {
+  const base = String(rawBase || "").trim();
+  if (!base) return "";
+  if (base.startsWith("/")) return base;
+  if (/^https?:\/\//i.test(base)) return base;
+
+  // Accept host-style env values like "example.up.railway.app"
+  // and convert them to absolute URLs.
+  if (base.includes("localhost") || base.startsWith("127.0.0.1")) {
+    return `http://${base}`;
+  }
+  return `https://${base}`;
+}
+
 function resolveApiBase() {
+  const normalizedBase = normalizeApiBase(RAW_API_BASE);
   // Prefer same-origin /api when frontend is served over HTTPS but env points to HTTP.
-  if (!RAW_API_BASE) return "";
+  if (!normalizedBase) return "";
   try {
-    const parsed = new URL(RAW_API_BASE);
+    const parsed = new URL(normalizedBase);
     const pageProtocol = typeof window !== "undefined" ? window.location.protocol : "";
     if (pageProtocol === "https:" && parsed.protocol === "http:") {
       return "";
     }
-    return RAW_API_BASE;
+    return normalizedBase;
   } catch {
     // If it's already a relative base, keep it.
-    return RAW_API_BASE;
+    return normalizedBase;
   }
 }
 
