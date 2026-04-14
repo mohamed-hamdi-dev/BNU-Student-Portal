@@ -22,6 +22,19 @@ const withToken = (url, token) => {
   return `${raw}${join}token=${encodeURIComponent(t)}`;
 };
 
+const normalizeProfilePhotoUrl = (url, token = "") => {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return withToken(raw, token);
+  }
+  if (raw.startsWith("/api/")) {
+    const apiBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+    if (apiBase) return withToken(`${apiBase}${raw}`, token);
+  }
+  return withToken(raw, token);
+};
+
 const normalizeTextKey = (value) => String(value || "").trim().toLowerCase();
 const compactTextKey = (value) => normalizeTextKey(value).replace(/\s+/g, "");
 const isGeneralMajor = (value) => {
@@ -42,6 +55,8 @@ const normalizeUser = (rawUser) => {
     "";
   const effectiveSpecialization = String(rawSpecialization || "").trim();
   const effectiveMajor = effectiveSpecialization && isGeneralMajor(rawMajor) ? effectiveSpecialization : rawMajor || "علوم الحاسب";
+
+  const token = String(localStorage.getItem("access_token") || "").trim();
 
   return {
     ...rawUser,
@@ -70,6 +85,7 @@ const normalizeUser = (rawUser) => {
     avatarSizePx: Number(rawUser.avatarSizePx ?? rawUser.avatar_size_px ?? 48) || 48,
     avatarObjectX: Math.max(0, Math.min(100, Number(rawUser.avatarObjectX ?? rawUser.avatar_object_x ?? 50) || 50)),
     avatarObjectY: Math.max(0, Math.min(100, Number(rawUser.avatarObjectY ?? rawUser.avatar_object_y ?? 50) || 50)),
+    profilePhotoUrl: normalizeProfilePhotoUrl(rawUser.profilePhotoUrl || rawUser.profile_photo_url || "", token),
   };
 };
 
@@ -169,7 +185,7 @@ export default function AuthContextProvider({ children }) {
           if (approvedPhoto?.fileUrl) {
             normalized = normalizeUser({
               ...normalized,
-              profilePhotoUrl: withToken(approvedPhoto.fileUrl, data.access_token),
+              profilePhotoUrl: approvedPhoto.fileUrl,
             });
           }
         } catch {
