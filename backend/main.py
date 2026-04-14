@@ -59,24 +59,27 @@ app.include_router(maintenance_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")
 
 # CORS middleware
+allowed_origins = {
+    "http://localhost:3000",
+    "http://localhost:4173",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:4173",
+    "http://127.0.0.1:5173",
+    "https://localhost:3000",
+    "https://localhost:4173",
+    "https://localhost:5173",
+    "https://127.0.0.1:3000",
+    "https://127.0.0.1:4173",
+    "https://127.0.0.1:5173",
+}
+allowed_origins.update(origin.strip() for origin in settings.CORS_ORIGINS if origin and origin.strip())
+
 app.add_middleware(
     CORSMiddleware,
-    # Support localhost + LAN dev origins without wildcard+credentials conflict.
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:4173",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:4173",
-        "http://127.0.0.1:5173",
-        "https://localhost:3000",
-        "https://localhost:4173",
-        "https://localhost:5173",
-        "https://127.0.0.1:3000",
-        "https://127.0.0.1:4173",
-        "https://127.0.0.1:5173",
-    ],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$",
+    # Support localhost, LAN dev origins, and Vercel previews/production.
+    allow_origins=sorted(allowed_origins),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|.*\.vercel\.app)(:\d+)?$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
