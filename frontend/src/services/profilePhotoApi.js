@@ -2,7 +2,7 @@ import { apiFetch } from "./api";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
 
-const toAbsoluteFileUrl = (value = "") => {
+export const toAbsoluteFileUrl = (value = "") => {
   if (!value) return "";
   if (value.startsWith("http://") || value.startsWith("https://")) return value;
   if (value.startsWith("/api/")) return value;
@@ -20,6 +20,15 @@ const toAbsoluteFileUrl = (value = "") => {
     base = API_BASE;
   }
   return `${base}${normalizedPath}`;
+};
+
+export const withAccessToken = (value = "", token = "") => {
+  const absoluteUrl = toAbsoluteFileUrl(value);
+  const rawToken = String(token || "").trim();
+  if (!absoluteUrl || !rawToken) return absoluteUrl;
+  if (absoluteUrl.includes("token=")) return absoluteUrl;
+  const join = absoluteUrl.includes("?") ? "&" : "?";
+  return `${absoluteUrl}${join}token=${encodeURIComponent(rawToken)}`;
 };
 
 const normalizePhoto = (item = {}) => ({

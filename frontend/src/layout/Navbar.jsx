@@ -9,7 +9,7 @@ import { services } from "../components/hooks/servicesData.js";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext.jsx";
 import { ThemeContext } from "../context/ThemeContext.jsx";
-import { getMyApprovedProfilePhoto } from "../services/profilePhotoApi.js";
+import { getMyApprovedProfilePhoto, withAccessToken } from "../services/profilePhotoApi.js";
 import NotificationBell from "../components/NotificationBell.jsx";
 
 export default function App() {
@@ -62,9 +62,7 @@ export default function App() {
                     setProfilePhotoUrl("");
                     return;
                 }
-                const token = localStorage.getItem("access_token") || "";
-                const joined = row.fileUrl.includes("?") ? "&" : "?";
-                setProfilePhotoUrl(`${row.fileUrl}${token ? `${joined}token=${encodeURIComponent(token)}` : ""}`);
+                setProfilePhotoUrl(withAccessToken(row.fileUrl, localStorage.getItem("access_token") || ""));
             } catch {
                 setProfilePhotoUrl("");
             }

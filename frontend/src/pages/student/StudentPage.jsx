@@ -5,18 +5,10 @@ import { QRCodeCanvas } from "qrcode.react";
 import { useTranslation } from "react-i18next";
 import Swal from "sweetalert2";
 import { apiFetch } from "../../services/api";
-import { getMyApprovedProfilePhoto } from "../../services/profilePhotoApi";
+import { getMyApprovedProfilePhoto, withAccessToken } from "../../services/profilePhotoApi";
 import { ThemeContext } from "../../context/ThemeContext";
 
 const isArabicLanguage = (lang) => String(lang || "ar").toLowerCase().startsWith("ar");
-const withToken = (url) => {
-    if (!url) return "";
-    const token = localStorage.getItem("access_token") || "";
-    if (!token) return url;
-    const join = url.includes("?") ? "&" : "?";
-    return `${url}${join}token=${encodeURIComponent(token)}`;
-};
-
 const hasBrokenEncoding = (value) => {
     const text = String(value ?? "").trim();
     if (!text) return false;
@@ -650,7 +642,7 @@ export default function Dashboard() {
                     phoneNumber: contactSettings?.phone_number || user?.phoneNumber || "",
                     nationalId: profile?.national_id || profile?.nationalId || user?.nationalId,
                     birthPlace: profile?.birth_place || profile?.birthPlace || user?.birthPlace,
-                    profilePhotoUrl: withToken(profilePhoto?.fileUrl || ""),
+                    profilePhotoUrl: withAccessToken(profilePhoto?.fileUrl || "", localStorage.getItem("access_token") || ""),
                 };
                 setUser(normalized);
                 localStorage.setItem("loggedUser", JSON.stringify(normalized));

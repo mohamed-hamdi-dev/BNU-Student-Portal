@@ -6,6 +6,7 @@ import { ThemeContext } from "../../context/ThemeContext.jsx";
 import ThemeToggle from "../../components/common/ThemeToggle.jsx";
 import ChangeLang from "../../components/Changelang.jsx";
 import { apiFetch } from "../../services/api";
+import { withAccessToken } from "../../services/profilePhotoApi.js";
 import { useTranslation } from "react-i18next";
 
 const menuItems = [
@@ -41,15 +42,7 @@ export default function AdminPortalLayout() {
     const isRTL = String(i18n.language || "ar").toLowerCase().startsWith("ar");
     const displayName = currentUser?.name || currentUser?.username || t("default_user");
     const displayUsername = currentUser?.username || currentUser?.id || "-";
-    const withToken = (url) => {
-        const raw = String(url || "").trim();
-        if (!raw) return "";
-        const token = localStorage.getItem("access_token") || "";
-        if (!token || raw.includes("token=")) return raw;
-        const join = raw.includes("?") ? "&" : "?";
-        return `${raw}${join}token=${encodeURIComponent(token)}`;
-    };
-    const profilePhotoUrl = withToken(currentUser?.profilePhotoUrl || "");
+    const profilePhotoUrl = withAccessToken(currentUser?.profilePhotoUrl || "", localStorage.getItem("access_token") || "");
 
     const avatarLetters = (displayName || "Admin User")
         .trim()
