@@ -212,13 +212,14 @@ def _password_expires_at(user: User):
 
 
 # ── Internal OTP Email helper (Placeholder for now) ───────────────────
-async def _send_otp_email(email: str, otp: str) -> None:
-    send_email(
-        email,
-        "BNU Portal - OTP Verification Code",
-        (
-            f"Your OTP code is: {otp}\n\n"
-            f"This code will expire in {max(1, settings.OTP_TTL_SECONDS // 60)} minutes."
+async def _send_otp_email(email: str, otp: str):
+    otp_minutes = max(1, settings.OTP_TTL_SECONDS // 60)
+    return await send_email(
+        to=email,
+        subject="BNU Portal - OTP Verification Code",
+        html=(
+            f"<p>Your OTP code is: <strong>{otp}</strong></p>"
+            f"<p>This code will expire in {otp_minutes} minutes.</p>"
         ),
     )
 
@@ -272,15 +273,15 @@ def _generate_temp_password(length: int = 10) -> str:
     return "".join(secrets.choice(chars) for _ in range(length))
 
 
-def _send_student_credentials_email(email: str, username: str, password: str) -> None:
-    send_email(
-        email,
-        "BNU Portal - Account Credentials",
-        (
-            "Your account has been created in BNU Portal.\n\n"
-            f"Username: {username}\n"
-            f"Temporary Password: {password}\n\n"
-            "Please change your password after your first login."
+async def _send_student_credentials_email(email: str, username: str, password: str):
+    return await send_email(
+        to=email,
+        subject="BNU Portal - Account Credentials",
+        html=(
+            "<p>Your account has been created in BNU Portal.</p>"
+            f"<p><strong>Username:</strong> {username}</p>"
+            f"<p><strong>Temporary Password:</strong> {password}</p>"
+            "<p>Please change your password after your first login.</p>"
         ),
     )
 
@@ -377,18 +378,13 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_otp)
 
-    try:
-        await _send_otp_email(recovery_email, otp_code)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OTP email delivery failed") from exc
+    send_result = await _send_otp_email(recovery_email, otp_code)
 
     response = {
-        "message": "If the email is registered, an OTP will be sent",
+        "message": send_result.message if not send_result.email_sent else "If the email is registered, an OTP will be sent",
         "request_id": str(db_otp.id),
         "expires_in_sec": settings.OTP_TTL_SECONDS,
+        "email_sent": bool(send_result.email_sent),
     }
     return response
 

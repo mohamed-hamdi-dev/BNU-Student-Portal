@@ -1,99 +1,86 @@
-"""
-Email delivery helpers.
-
-Uses Resend when configured, with an SMTP fallback for local development.
-"""
+"""Async email delivery helpers backed by Resend HTTP API."""
 
 from __future__ import annotations
 
 import json
 import logging
-import smtplib
-from email.message import EmailMessage
-from urllib import error, request
+from dataclasses import dataclass
 
-from fastapi import HTTPException
+import httpx
 
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-def _get_resend_from_address() -> str:
-    settings = get_settings()
-    return str(getattr(settings, "RESEND_FROM_EMAIL", "") or settings.MAIL_USERNAME or "").strip()
+@dataclass(slots=True)
+class EmailSendResult:
+    email_sent: bool
+    message: str
+    provider_id: str | None = None
+    error: str | None = None
+
+    def as_dict(self) -> dict:
+        payload = {"email_sent": self.email_sent, "message": self.message}
+        if self.provider_id:
+            payload["provider_id"] = self.provider_id
+        if self.error:
+            payload["error"] = self.error
+        return payload
 
 
-def _send_via_resend(to_email: str, subject: str, text_body: str, html_body: str | None = None) -> None:
+def _get_resend_config() -> tuple[str, str]:
     settings = get_settings()
     api_key = str(getattr(settings, "RESEND_API_KEY", "") or "").strip()
-    from_email = _get_resend_from_address()
+    from_email = str(getattr(settings, "RESEND_FROM_EMAIL", "") or "").strip()
+    return api_key, from_email
+
+
+async def send_email(to: str, subject: str, html: str) -> EmailSendResult:
+    """
+    Send email via Resend API (async, event-loop friendly).
+    Returns an explicit success/failure result and never raises to callers.
+    """
+    api_key, from_email = _get_resend_config()
     if not api_key or not from_email:
-        raise RuntimeError("Resend is not configured")
+        return EmailSendResult(
+            email_sent=False,
+            message="Email service temporarily unavailable",
+            error="Resend is not configured",
+        )
 
     payload = {
         "from": from_email,
-        "to": [to_email],
-        "subject": subject,
-        "text": text_body,
+        "to": [str(to).strip()],
+        "subject": str(subject or "").strip(),
+        "html": str(html or ""),
     }
-    if html_body:
-        payload["html"] = html_body
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
-    data = json.dumps(payload).encode("utf-8")
-    req = request.Request(
-        "https://api.resend.com/emails",
-        data=data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with request.urlopen(req, timeout=20) as resp:
-            if resp.status >= 400:
-                raise RuntimeError(f"Resend returned HTTP {resp.status}")
-    except error.HTTPError as exc:
-        raise RuntimeError(f"Resend returned HTTP {exc.code}") from exc
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post("https://api.resend.com/emails", headers=headers, content=json.dumps(payload))
+        if 200 <= response.status_code < 300:
+            body = response.json() if response.content else {}
+            return EmailSendResult(
+                email_sent=True,
+                message="Email sent successfully",
+                provider_id=str(body.get("id") or "").strip() or None,
+            )
 
-
-def _send_via_smtp(to_email: str, subject: str, text_body: str, html_body: str | None = None) -> None:
-    settings = get_settings()
-    if not settings.MAIL_USERNAME or not settings.MAIL_PASSWORD:
-        raise RuntimeError("SMTP is not configured")
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = settings.MAIL_USERNAME
-    msg["To"] = to_email
-    if html_body:
-        msg.set_content(text_body)
-        msg.add_alternative(html_body, subtype="html")
-    else:
-        msg.set_content(text_body)
-
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
-        server.send_message(msg)
-
-
-def send_email(to_email: str, subject: str, text_body: str, html_body: str | None = None) -> None:
-    """
-    Send an email using Resend when configured, otherwise SMTP fallback.
-    Raises HTTP 503 on delivery failure to keep frontend errors explicit.
-    """
-    try:
-        _send_via_resend(to_email, subject, text_body, html_body)
-        return
+        logger.error("Resend send failed status=%s body=%s", response.status_code, response.text)
+        return EmailSendResult(
+            email_sent=False,
+            message="Email service temporarily unavailable",
+            error=f"resend_http_{response.status_code}",
+        )
     except Exception as exc:
-        logger.warning("Resend delivery failed; falling back to SMTP: %s", exc)
-
-    try:
-        _send_via_smtp(to_email, subject, text_body, html_body)
-    except Exception as exc:
-        logger.exception("SMTP delivery failed")
-        raise HTTPException(status_code=503, detail=f"Email delivery failed: {exc}") from exc
+        logger.exception("Resend delivery failed")
+        return EmailSendResult(
+            email_sent=False,
+            message="Email service temporarily unavailable",
+            error=str(exc),
+        )

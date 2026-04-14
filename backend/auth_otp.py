@@ -74,11 +74,14 @@ class OtpRecord:
 _otp_store: Dict[str, OtpRecord] = {}
 
 
-async def _send_otp_email(email: str, otp: str) -> None:
-    send_email(
-        email,
-        "Your OTP Code",
-        f"Your verification code is: {otp}\n\nThis code expires in 5 minutes.",
+async def _send_otp_email(email: str, otp: str):
+    return await send_email(
+        to=email,
+        subject="Your OTP Code",
+        html=(
+            f"<p>Your verification code is: <strong>{otp}</strong></p>"
+            "<p>This code expires in 5 minutes.</p>"
+        ),
     )
 
 
@@ -109,15 +112,10 @@ async def request_otp(body: RequestOtpBody):
         attempts=0,
     )
 
-    try:
-        await _send_otp_email(stored_email, otp)
-    except HTTPException:
+    result = await _send_otp_email(stored_email, otp)
+    if not result.email_sent:
         _otp_store.pop(email, None)
-        raise
-    except Exception as exc:
-        _otp_store.pop(email, None)
-        print(f"OTP email send failed for {email}: {exc}")
-        raise HTTPException(status_code=503, detail="OTP service unavailable")
+        raise HTTPException(status_code=503, detail="Email service temporarily unavailable")
 
     return {"message": "If the email is registered, an OTP will be sent"}
 

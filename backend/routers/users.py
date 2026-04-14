@@ -90,15 +90,15 @@ def _password_expiry_metadata(user: User) -> tuple[bool, datetime | None]:
     return datetime.now(timezone.utc) >= expires_at, expires_at
 
 
-def _send_account_credentials_email(email: str, username: str, temp_password: str) -> None:
-    send_email(
-        email,
-        "BNU Portal - Temporary Login Credentials",
-        (
-            "Your account has been created in BNU Portal.\n\n"
-            f"Username: {username}\n"
-            f"Temporary Password: {temp_password}\n\n"
-            "Please login and change your password immediately."
+async def _send_account_credentials_email(email: str, username: str, temp_password: str):
+    return await send_email(
+        to=email,
+        subject="BNU Portal - Temporary Login Credentials",
+        html=(
+            "<p>Your account has been created in BNU Portal.</p>"
+            f"<p><strong>Username:</strong> {username}</p>"
+            f"<p><strong>Temporary Password:</strong> {temp_password}</p>"
+            "<p>Please login and change your password immediately.</p>"
         ),
     )
 
@@ -1127,7 +1127,7 @@ async def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
     # Send initial credentials email for students when SMTP is configured.
     if _normalize_text_key(user_in.role) == "student":
         try:
-            _send_account_credentials_email(
+            await _send_account_credentials_email(
                 email=str(db_user.email or "").strip(),
                 username=str(db_user.username or "").strip(),
                 temp_password=str(user_in.password or "").strip(),
@@ -1344,11 +1344,12 @@ async def review_account_request(
 
     email_sent = True
     try:
-        _send_account_credentials_email(
+        email_result = await _send_account_credentials_email(
             email=str(db_user.email or "").strip(),
             username=str(db_user.username or "").strip(),
             temp_password=temp_password,
         )
+        email_sent = bool(email_result.email_sent)
     except Exception as exc:
         email_sent = False
         print(f"Credentials email send failed for {db_user.email}: {exc}")

@@ -53,10 +53,6 @@ class Settings:
         if item.strip()
     ]
 
-    SMTP_HOST: str = _env_str("SMTP_HOST", "smtp.gmail.com")
-    SMTP_PORT: int = _env_int("SMTP_PORT", 587)
-    MAIL_USERNAME: str = _env_str("MAIL_USERNAME", "")
-    MAIL_PASSWORD: str = _env_str("MAIL_PASSWORD", "")
     RESEND_API_KEY: str = _env_str("RESEND_API_KEY", "")
     RESEND_FROM_EMAIL: str = _env_str("RESEND_FROM_EMAIL", "")
 
