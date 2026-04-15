@@ -50,6 +50,7 @@ from .academic_core import (
     GradingScaleItem,
 )
 from .knowledge import ContentItem, KnowledgeDocument, KnowledgeChunk, Asset, ChunkAssetMap
+from .auth_security import UserSession, LoginAttempt
 
 __all__ = [
     "User",
@@ -106,4 +107,6 @@ __all__ = [
     "KnowledgeChunk",
     "Asset",
     "ChunkAssetMap",
+    "UserSession",
+    "LoginAttempt",
 ]

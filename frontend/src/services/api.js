@@ -34,6 +34,7 @@ function resolveApiBase() {
 
 const API_BASE = resolveApiBase();
 const CHAT_CACHE_KEYS = ["campusAssistantChats", "campusAssistantActiveChat"];
+const SESSION_NOTICE_KEY = "session_expired_notice";
 
 function withLoopbackFallback(url) {
   const urls = [url];
@@ -153,7 +154,14 @@ export async function apiFetch(path, options = {}) {
   }
 
   if (res.status === 401 && path !== "/api/auth/login") {
-    // Token expired or invalid
+    const errBody = await res.json().catch(() => ({}));
+    const detail = normalizeApiErrorDetail(errBody?.detail, res.status);
+    const normalizedDetail = String(detail || "").trim();
+    if (normalizedDetail) {
+      localStorage.setItem(SESSION_NOTICE_KEY, normalizedDetail);
+    } else {
+      localStorage.setItem(SESSION_NOTICE_KEY, "انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.");
+    }
     clearClientSession();
     window.location.replace("/");
     return;

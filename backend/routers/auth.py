@@ -5,7 +5,7 @@ Handles login (JWT issuance), OTP generation, and password resets.
 
 from datetime import datetime, timedelta, timezone
 import json
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy import text
@@ -13,6 +13,15 @@ from sqlalchemy import inspect
 
 from core.email import send_email
 from core.security import verify_password, create_access_token, hash_password
+from core.session_security import (
+    check_login_lockout,
+    clear_login_failures,
+    create_user_session,
+    get_request_ip,
+    get_request_user_agent,
+    normalize_login_key,
+    register_login_failure,
+)
 from core.deps import get_db, get_current_user
 from core.config import get_settings
 from models.user import User
@@ -288,33 +297,65 @@ async def _send_student_credentials_email(email: str, username: str, password: s
 
 # ── 1. Login (JWT) ────────────────────────────────────────────────────
 @router.post("/login", response_model=Token)
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
+async def login(body: LoginRequest, http_request: Request, db: Session = Depends(get_db)):
     """Authenticate user and return a JWT token with profile data."""
     ensure_auth_security_schema(db)
+    username_key = normalize_login_key(body.username)
+    request_ip = get_request_ip(http_request)
+
+    is_locked, remaining_seconds = check_login_lockout(db, username_key, request_ip)
+    if is_locked:
+        wait_minutes = max(1, int((remaining_seconds + 59) // 60))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"تم إيقاف تسجيل الدخول مؤقتًا بسبب محاولات كثيرة. حاول بعد {wait_minutes} دقيقة.",
+        )
 
     user = db.query(User).filter(
         or_(
-            User.username == request.username,
-            User.email == request.username,
-            User.student_code == request.username,
+            User.username == body.username,
+            User.email == body.username,
+            User.student_code == body.username,
         )
     ).first()
 
     if not user:
+        reached_lock, lock_seconds = register_login_failure(db, username_key, request_ip)
+        if reached_lock:
+            wait_minutes = max(1, int((lock_seconds + 59) // 60))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"تم إيقاف تسجيل الدخول مؤقتًا بسبب محاولات كثيرة. حاول بعد {wait_minutes} دقيقة.",
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
 
-    if not verify_password(request.password, user.password_hash):
+    if not verify_password(body.password, user.password_hash):
+        reached_lock, lock_seconds = register_login_failure(db, username_key, request_ip)
+        if reached_lock:
+            wait_minutes = max(1, int((lock_seconds + 59) // 60))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"تم إيقاف تسجيل الدخول مؤقتًا بسبب محاولات كثيرة. حاول بعد {wait_minutes} دقيقة.",
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
 
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated")
 
+    clear_login_failures(db, username_key, request_ip)
+    user_session = create_user_session(
+        db,
+        user_id=int(user.id),
+        ip_address=request_ip,
+        user_agent=get_request_user_agent(http_request),
+    )
+
     must_change_password = bool(getattr(user, "must_change_password", False))
     password_expired = bool(_is_password_expired(user))
     must_change_effective = bool(must_change_password or password_expired)
 
-    access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
-    token = create_access_token(data={"sub": str(user.id)}, expires_delta=access_token_expires)
+    access_token_expires = timedelta(hours=max(1, int(settings.SESSION_ABSOLUTE_TIMEOUT_HOURS or 8)))
+    token = create_access_token(data={"sub": str(user.id), "sid": user_session.session_id}, expires_delta=access_token_expires)
     safe_user = _safe_user_profile_payload(user)
 
     try:

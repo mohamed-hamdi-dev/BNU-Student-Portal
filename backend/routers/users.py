@@ -24,9 +24,8 @@ from sqlalchemy.exc import IntegrityError
 
 from core.config import get_settings
 from core.email import send_email
-from core.deps import get_db, get_current_user, require_role, security_scheme
+from core.deps import get_db, get_current_user, require_role, resolve_authenticated_user_from_token, security_scheme
 from core.security import hash_password
-from core.security import decode_access_token
 from models.academic import AcademicState
 from models.user_photo import UserProfilePhoto
 from models.account_request import AccountRequest
@@ -488,20 +487,7 @@ def get_current_user_for_photo_access(
     if not raw_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    payload = decode_access_token(raw_token)
-    if payload is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="User account is deactivated")
-    return user
+    return resolve_authenticated_user_from_token(raw_token, db)
 
 
 # â”€â”€ 1. Get Me (Current User) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

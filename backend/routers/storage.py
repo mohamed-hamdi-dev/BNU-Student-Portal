@@ -17,8 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from fastapi.responses import FileResponse
 
-from core.deps import get_db, get_current_user, require_role, security_scheme
-from core.security import decode_access_token
+from core.deps import get_db, get_current_user, require_role, resolve_authenticated_user_from_token, security_scheme
 from models.user import User
 from models.storage import StorageItem
 from models.content import ContentPost
@@ -314,21 +313,7 @@ def get_current_user_for_file_access(
     if not raw_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    payload = decode_access_token(raw_token)
-    if payload is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="User account is deactivated")
-
-    return user
+    return resolve_authenticated_user_from_token(raw_token, db)
 
 
 def _is_admin_user(user: User) -> bool:

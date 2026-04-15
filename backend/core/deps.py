@@ -9,12 +9,13 @@ Provides:
 
 from typing import Generator
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
 from core.security import decode_access_token
+from core.session_security import validate_and_touch_user_session
 
 # Lazy import to avoid circular imports — resolved at runtime
 _User = None
@@ -42,29 +43,12 @@ security_scheme = HTTPBearer(auto_error=False)
 
 
 # ── Current User ──────────────────────────────────────────────────────
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
-    db: Session = Depends(get_db),
+def resolve_authenticated_user_from_token(
+    raw_token: str,
+    db: Session,
 ):
-    """
-    Extract and validate the current user from the JWT Bearer token.
-
-    Raises 401 if:
-      - No token provided
-      - Token is invalid or expired
-      - User not found in database
-      - User is deactivated
-    """
     User = _get_user_model()
-
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    payload = decode_access_token(credentials.credentials)
+    payload = decode_access_token(raw_token)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,10 +57,19 @@ def get_current_user(
         )
 
     user_id = payload.get("sub")
-    if user_id is None:
+    session_id = str(payload.get("sid") or "").strip()
+    if user_id is None or not session_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
+        )
+
+    is_valid_session, session_error = validate_and_touch_user_session(db, int(user_id), session_id)
+    if not is_valid_session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=session_error or "Session expired",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     user = db.query(User).filter(User.id == int(user_id)).first()
@@ -93,6 +86,30 @@ def get_current_user(
         )
 
     return user
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Extract and validate the current user from the JWT Bearer token.
+
+    Raises 401 if:
+      - No token provided
+      - Token is invalid or expired
+      - User not found in database
+      - User is deactivated
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    _ = request  # kept for explicit dependency injection and future request-aware checks.
+    return resolve_authenticated_user_from_token(credentials.credentials, db)
 
 
 # ── Role-Based Access Control ─────────────────────────────────────────

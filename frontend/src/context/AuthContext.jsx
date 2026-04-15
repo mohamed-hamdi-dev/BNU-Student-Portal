@@ -6,8 +6,11 @@ import { getMyApprovedProfilePhoto } from "../services/profilePhotoApi";
 
 export const AuthContext = createContext(null);
 
-const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const IDLE_WARNING_MS = 60 * 1000;
+const ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+const SESSION_STARTED_AT_KEY = "session_started_at_ms";
+const SESSION_NOTICE_KEY = "session_expired_notice";
 const CHAT_CACHE_KEYS = [
   "campusAssistantChats",
   "campusAssistantActiveChat",
@@ -92,6 +95,7 @@ const normalizeUser = (rawUser) => {
 const clearSessionStorage = () => {
   localStorage.removeItem("access_token");
   localStorage.removeItem("loggedUser");
+  localStorage.removeItem(SESSION_STARTED_AT_KEY);
   CHAT_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
 };
 
@@ -104,6 +108,7 @@ export default function AuthContextProvider({ children }) {
   const [warningSecondsLeft, setWarningSecondsLeft] = useState(Math.ceil(IDLE_WARNING_MS / 1000));
   const warningTimerRef = useRef(null);
   const logoutTimerRef = useRef(null);
+  const absoluteTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
   const idleDeadlineRef = useRef(0);
   const lastActivityRef = useRef(0);
@@ -117,14 +122,21 @@ export default function AuthContextProvider({ children }) {
       window.clearTimeout(logoutTimerRef.current);
       logoutTimerRef.current = null;
     }
+    if (absoluteTimerRef.current) {
+      window.clearTimeout(absoluteTimerRef.current);
+      absoluteTimerRef.current = null;
+    }
     if (countdownTimerRef.current) {
       window.clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback((reason = "manual") => {
     clearIdleTimers();
+    if (reason === "expired") {
+      localStorage.setItem(SESSION_NOTICE_KEY, "انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.");
+    }
     clearSessionStorage();
     setShowIdleWarning(false);
     setWarningSecondsLeft(Math.ceil(IDLE_WARNING_MS / 1000));
@@ -137,6 +149,19 @@ export default function AuthContextProvider({ children }) {
     if (!localStorage.getItem("access_token")) return;
 
     const now = Date.now();
+    const startedAtRaw = Number(localStorage.getItem(SESSION_STARTED_AT_KEY) || 0);
+    const sessionStartedAt = Number.isFinite(startedAtRaw) && startedAtRaw > 0 ? startedAtRaw : now;
+    if (sessionStartedAt === now) {
+      localStorage.setItem(SESSION_STARTED_AT_KEY, String(sessionStartedAt));
+    }
+
+    const absoluteRemaining = sessionStartedAt + ABSOLUTE_TIMEOUT_MS - now;
+    if (absoluteRemaining <= 0) {
+      logout("expired");
+      window.location.replace("/");
+      return;
+    }
+
     idleDeadlineRef.current = now + IDLE_TIMEOUT_MS;
     setShowIdleWarning(false);
     setWarningSecondsLeft(Math.ceil(IDLE_WARNING_MS / 1000));
@@ -151,9 +176,14 @@ export default function AuthContextProvider({ children }) {
     }, IDLE_TIMEOUT_MS - IDLE_WARNING_MS);
 
     logoutTimerRef.current = window.setTimeout(() => {
-      logout();
+      logout("expired");
       window.location.replace("/");
     }, IDLE_TIMEOUT_MS);
+
+    absoluteTimerRef.current = window.setTimeout(() => {
+      logout("expired");
+      window.location.replace("/");
+    }, absoluteRemaining);
   }, [clearIdleTimers, logout]);
 
   const login = useCallback(
@@ -165,6 +195,7 @@ export default function AuthContextProvider({ children }) {
         });
 
         localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem(SESSION_STARTED_AT_KEY, String(Date.now()));
         let normalized = normalizeUser(data.user);
         try {
           const contactSettings = await apiFetch("/api/users/me/contact-settings");
@@ -220,6 +251,14 @@ export default function AuthContextProvider({ children }) {
     },
     [armIdleTimers]
   );
+
+  useEffect(() => {
+    const sessionNotice = String(localStorage.getItem(SESSION_NOTICE_KEY) || "").trim();
+    if (sessionNotice) {
+      localStorage.removeItem(SESSION_NOTICE_KEY);
+      window.setTimeout(() => window.alert(sessionNotice), 50);
+    }
+  }, []);
 
   useEffect(() => {
     const onStorageChange = (event) => {
