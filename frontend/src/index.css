@@ -460,6 +460,43 @@ html[data-theme="dark"] .cm-soft-scroll::-webkit-scrollbar-thumb {
   }
 }
 
+/* Registration form print cleanup */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body:has(.registration-form-page) {
+    background: #ffffff !important;
+  }
+
+  body:has(.registration-form-page) nav,
+  body:has(.registration-form-page) footer,
+  body:has(.registration-form-page) aside,
+  body:has(.registration-form-page) .fixed {
+    display: none !important;
+  }
+
+  body:has(.registration-form-page) .registration-form-page {
+    min-height: auto !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body:has(.registration-form-page) .registration-form-page table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+
+  body:has(.registration-form-page) .registration-form-page th,
+  body:has(.registration-form-page) .registration-form-page td {
+    white-space: normal !important;
+    word-break: break-word;
+  }
+}
+
 /* ============================================================= */
 /* Unified SweetAlert2 Theme (toast + modal) */
 .swal2-container {

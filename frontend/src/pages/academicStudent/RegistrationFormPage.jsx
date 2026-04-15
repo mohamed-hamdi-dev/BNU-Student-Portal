@@ -13,7 +13,7 @@ const display = (value, fallback = "-") => {
 
 export default function RegistrationFormPage() {
   const { t, i18n } = useTranslation("global");
-  const { openSemester, semesterNames } = useContext(SystemContext);
+  const { openSemester, semesterNames, courses: systemCourses = [] } = useContext(SystemContext);
   const { selectedCourses } = useContext(CoursesContext);
   const [serverCourses, setServerCourses] = useState([]);
 
@@ -49,16 +49,20 @@ export default function RegistrationFormPage() {
         const localByCode = new Map(
           localSemesterCourses.map((course) => [String(course?.id || course?.code || "").trim().toUpperCase(), course])
         );
+        const systemByCode = new Map(
+          (Array.isArray(systemCourses) ? systemCourses : []).map((course) => [String(course?.id || course?.code || "").trim().toUpperCase(), course])
+        );
 
         const mapped = selections
           .map((selection, index) => {
             const courseCode = String(selection?.course_code || "").trim();
             const normalizedCode = courseCode.toUpperCase();
             const localCourse = localByCode.get(normalizedCode);
+            const systemCourse = systemByCode.get(normalizedCode);
             return {
               id: localCourse?.id || courseCode || `srv-${index}`,
               code: courseCode || localCourse?.code || "-",
-              name: localCourse?.name || selection?.course_name || selection?.offering_title || "-",
+              name: localCourse?.name || systemCourse?.name || selection?.course_name || selection?.offering_title || "-",
               semester: String(openSemester || ""),
               lecture: {
                 day: selection?.day_of_week || localCourse?.lecture?.day || "",
@@ -70,8 +74,8 @@ export default function RegistrationFormPage() {
               selectedGroup: {
                 name: selection?.section || localCourse?.selectedGroup?.name || "-",
               },
-              hours: Number(localCourse?.hours || localCourse?.credits || selection?.credit_hours || 0) || 0,
-              credits: Number(localCourse?.credits || localCourse?.hours || selection?.credit_hours || 0) || 0,
+              hours: Number(localCourse?.hours || localCourse?.credits || systemCourse?.hours || systemCourse?.credits || selection?.credit_hours || 0) || 0,
+              credits: Number(localCourse?.credits || localCourse?.hours || systemCourse?.credits || systemCourse?.hours || selection?.credit_hours || 0) || 0,
             };
           })
           .filter((course) => String(course.code || "").trim());
@@ -86,7 +90,7 @@ export default function RegistrationFormPage() {
     return () => {
       active = false;
     };
-  }, [openSemester, localSemesterCourses]);
+  }, [openSemester, localSemesterCourses, systemCourses]);
 
   const semesterCourses = useMemo(() => {
     if (serverCourses.length > 0) return serverCourses;
@@ -111,10 +115,9 @@ export default function RegistrationFormPage() {
   const semesterLabel = semesterNames?.[openSemester] || openSemester || "-";
 
   return (
-    <div className="min-h-screen bg-[#F6F8FB] pt-20 pb-8 px-4" dir={i18n.language === "ar" ? "rtl" : "ltr"}>
-      <div className="mx-auto max-w-5xl space-y-5">
-        <div className="print:hidden flex items-center justify-between">
-          <h1 className="text-2xl font-black text-slate-800">{t("registration_form")}</h1>
+    <div className="registration-form-page min-h-screen bg-[#F6F8FB] pt-[2cm] pb-8 px-4 print:bg-white print:pt-0 print:pb-0 print:px-0" dir={i18n.language === "ar" ? "rtl" : "ltr"}>
+      <div className="mx-auto max-w-5xl space-y-5 print:space-y-2">
+        <div className="print:hidden mt-4 flex items-center justify-end">
           <button
             type="button"
             onClick={() => window.print()}
@@ -125,7 +128,7 @@ export default function RegistrationFormPage() {
           </button>
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm print:rounded-none print:border-0 print:shadow-none print:p-0">
           <div className="mb-5 border-b border-slate-100 pb-4">
             <h2 className="text-xl font-black text-slate-800">{i18n.language === "ar" ? "استمارة تسجيل المواد" : "Course Registration Form"}</h2>
             <p className="mt-1 text-sm text-slate-500">
@@ -133,27 +136,27 @@ export default function RegistrationFormPage() {
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl bg-slate-50 p-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 print:gap-2">
+            <div className="rounded-xl bg-slate-50 p-3 print:bg-white print:border print:border-slate-200">
               <p className="text-xs text-slate-500">{i18n.language === "ar" ? "اسم الطالب" : "Student Name"}</p>
               <p className="mt-1 text-sm font-bold text-slate-800">{display(officialName)}</p>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3 print:bg-white print:border print:border-slate-200">
               <p className="text-xs text-slate-500">{i18n.language === "ar" ? "كود الطالب" : "Student ID"}</p>
               <p className="mt-1 text-sm font-bold text-slate-800">{display(user?.studentId || user?.username)}</p>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3 print:bg-white print:border print:border-slate-200">
               <p className="text-xs text-slate-500">{i18n.language === "ar" ? "الكلية" : "College"}</p>
               <p className="mt-1 text-sm font-bold text-slate-800">{display(user?.college || user?.faculty || user?.major)}</p>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3 print:bg-white print:border print:border-slate-200">
               <p className="text-xs text-slate-500">{i18n.language === "ar" ? "تاريخ الإصدار" : "Issue Date"}</p>
               <p className="mt-1 text-sm font-bold text-slate-800">{issueDate}</p>
             </div>
           </div>
 
-          <div className="mt-8 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="w-full min-w-[680px] border-collapse text-sm">
+          <div className="mt-8 overflow-x-auto rounded-2xl border border-slate-200 print:mt-4 print:overflow-visible print:rounded-none">
+            <table className="w-full min-w-[680px] border-collapse text-sm print:min-w-0 print:text-[11px]">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-4 py-3 text-start font-bold text-slate-600">{i18n.language === "ar" ? "كود المادة" : "Course Code"}</th>
@@ -186,12 +189,12 @@ export default function RegistrationFormPage() {
             </table>
           </div>
 
-          <div className="mt-5 flex items-center justify-between rounded-xl bg-[#05ADCF]/10 px-4 py-3">
+          <div className="mt-5 flex items-center justify-between rounded-xl bg-[#05ADCF]/10 px-4 py-3 print:mt-2 print:bg-white print:border print:border-slate-200">
             <span className="text-sm font-bold text-slate-700">{i18n.language === "ar" ? "عدد المواد المسجلة" : "Registered Courses"}</span>
             <span className="text-sm font-black text-[#037C95]">{semesterCourses.length}</span>
           </div>
 
-          <div className="mt-3 flex items-center justify-between rounded-xl bg-[#05ADCF]/10 px-4 py-3">
+          <div className="mt-3 flex items-center justify-between rounded-xl bg-[#05ADCF]/10 px-4 py-3 print:bg-white print:border print:border-slate-200">
             <span className="text-sm font-bold text-slate-700">{i18n.language === "ar" ? "إجمالي الساعات" : "Total Hours"}</span>
             <span className="text-sm font-black text-[#037C95]">{totalHours}</span>
           </div>
