@@ -356,9 +356,9 @@ const SemesterTable = ({ records, publishMap }) => {
     );
 
     return (
-        <div className="rounded-2xl border border-gray-100 bg-white/50 backdrop-blur-md shadow-sm overflow-hidden">
+        <div className="relative z-10 rounded-2xl border border-gray-100 bg-white/50 backdrop-blur-md shadow-sm overflow-visible">
             {renderMobileCards()}
-            <div className="hidden md:block w-full overflow-hidden">{renderTable()}</div>
+            <div className="hidden md:block w-full overflow-visible">{renderTable()}</div>
         </div>
     );
 };
@@ -391,7 +391,7 @@ const AccordionItem = ({ item, isOpen, onToggle, publishMap }) => {
                 </div>
             </button>
 
-            <div className={`overflow-hidden transition-[max-height,opacity,margin] duration-300 ${isOpen ? "max-h-[2200px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0 pointer-events-none"}`}>
+            <div className={`transition-[max-height,opacity,margin] duration-300 ${isOpen ? "overflow-visible max-h-[2200px] opacity-100 mt-3" : "overflow-hidden max-h-0 opacity-0 mt-0 pointer-events-none"}`}>
                 <SemesterTable records={item.records} publishMap={publishMap} />
             </div>
         </div>
@@ -644,7 +644,6 @@ export default function CourseTablePage() {
         </div>
     );
 }
-
 
 
 
