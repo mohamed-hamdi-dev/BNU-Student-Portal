@@ -281,7 +281,7 @@ function PersonData({ user, onUserUpdate, forcePasswordChange = false, onPasswor
 
                             {showMenu && (
                                 <div
-                                    className={`absolute left-[1] mt-3 w-64 rounded-2xl shadow-2xl border py-2 z-40 animate-in fade-in zoom-in duration-200 origin-top-left overflow-hidden ${
+                                    className={`absolute right-0 mt-3 w-[min(16rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] rounded-2xl shadow-2xl border py-2 z-40 animate-in fade-in zoom-in duration-200 origin-top-right overflow-hidden max-h-[70vh] overflow-y-auto ${
                                         isDarkMode ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100"
                                     }`}
                                 >
