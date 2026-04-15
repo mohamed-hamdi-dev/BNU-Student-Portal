@@ -1,8 +1,10 @@
-import React, { useContext, useMemo } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Printer } from "lucide-react";
 import { SystemContext } from "../../context/SystemContext";
 import { CoursesContext } from "../../context/CoursesContext";
+import { getMyRegistration } from "../../services/advisorRegistrationApi";
+import { getCurrentAcademicYear } from "../../utils/academicData";
 
 const display = (value, fallback = "-") => {
   const text = String(value ?? "").trim();
@@ -13,6 +15,7 @@ export default function RegistrationFormPage() {
   const { t, i18n } = useTranslation("global");
   const { openSemester, semesterNames } = useContext(SystemContext);
   const { selectedCourses } = useContext(CoursesContext);
+  const [serverCourses, setServerCourses] = useState([]);
 
   const user = useMemo(() => {
     try {
@@ -26,10 +29,69 @@ export default function RegistrationFormPage() {
     [user]
   );
 
-  const semesterCourses = useMemo(
+  const localSemesterCourses = useMemo(
     () => selectedCourses.filter((course) => String(course.semester || "") === String(openSemester || "")),
     [selectedCourses, openSemester]
   );
+
+  useEffect(() => {
+    let active = true;
+    const hydrateFromBackend = async () => {
+      try {
+        if (!openSemester) {
+          if (active) setServerCourses([]);
+          return;
+        }
+        const response = await getMyRegistration(String(getCurrentAcademicYear()), String(openSemester));
+        if (!active) return;
+
+        const selections = Array.isArray(response?.selections) ? response.selections : [];
+        const localByCode = new Map(
+          localSemesterCourses.map((course) => [String(course?.id || course?.code || "").trim().toUpperCase(), course])
+        );
+
+        const mapped = selections
+          .map((selection, index) => {
+            const courseCode = String(selection?.course_code || "").trim();
+            const normalizedCode = courseCode.toUpperCase();
+            const localCourse = localByCode.get(normalizedCode);
+            return {
+              id: localCourse?.id || courseCode || `srv-${index}`,
+              code: courseCode || localCourse?.code || "-",
+              name: localCourse?.name || selection?.course_name || selection?.offering_title || "-",
+              semester: String(openSemester || ""),
+              lecture: {
+                day: selection?.day_of_week || localCourse?.lecture?.day || "",
+                time:
+                  selection?.start_time && selection?.end_time
+                    ? `${selection.start_time} - ${selection.end_time}`
+                    : localCourse?.lecture?.time || "",
+              },
+              selectedGroup: {
+                name: selection?.section || localCourse?.selectedGroup?.name || "-",
+              },
+              hours: Number(localCourse?.hours || localCourse?.credits || selection?.credit_hours || 0) || 0,
+              credits: Number(localCourse?.credits || localCourse?.hours || selection?.credit_hours || 0) || 0,
+            };
+          })
+          .filter((course) => String(course.code || "").trim());
+
+        setServerCourses(mapped);
+      } catch {
+        if (active) setServerCourses([]);
+      }
+    };
+
+    hydrateFromBackend();
+    return () => {
+      active = false;
+    };
+  }, [openSemester, localSemesterCourses]);
+
+  const semesterCourses = useMemo(() => {
+    if (serverCourses.length > 0) return serverCourses;
+    return localSemesterCourses;
+  }, [serverCourses, localSemesterCourses]);
 
   const totalHours = useMemo(
     () => semesterCourses.reduce((sum, course) => sum + Number(course.hours || course.credits || 0), 0),
@@ -90,7 +152,7 @@ export default function RegistrationFormPage() {
             </div>
           </div>
 
-          <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
+          <div className="mt-8 overflow-x-auto rounded-2xl border border-slate-200">
             <table className="w-full min-w-[680px] border-collapse text-sm">
               <thead className="bg-slate-50">
                 <tr>
