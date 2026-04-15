@@ -111,7 +111,7 @@ export default function RegistrationFormPage() {
   const semesterLabel = semesterNames?.[openSemester] || openSemester || "-";
 
   return (
-    <div className="min-h-screen bg-[#F6F8FB] py-8 px-4" dir={i18n.language === "ar" ? "rtl" : "ltr"}>
+    <div className="min-h-screen bg-[#F6F8FB] pt-20 pb-8 px-4" dir={i18n.language === "ar" ? "rtl" : "ltr"}>
       <div className="mx-auto max-w-5xl space-y-5">
         <div className="print:hidden flex items-center justify-between">
           <h1 className="text-2xl font-black text-slate-800">{t("registration_form")}</h1>
