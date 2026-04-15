@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useCallback, useRef } from "react";
 import Navbar from "../../layout/Navbar";
-import { listMyQuizResults, listQuizzesScoped, submitQuiz } from "../../services/quizApi";
+import { listMyQuizResults, listQuizzes, submitQuiz } from "../../services/quizApi";
 import { useTranslation } from "react-i18next";
 import { 
   Clock, Timer, Calendar, ChevronRight, 
@@ -429,46 +429,6 @@ const StudentDashboard = ({ user, quizzes, submissions, onSubmitQuiz }) => {
     );
 };
 
-const normalizeTextKey = (value) => String(value ?? "").trim().toLowerCase();
-const getUserCollegeKey = (user = {}) =>
-  normalizeTextKey(user.collegeId ?? user.college_id ?? user.college ?? user.faculty ?? user.major ?? user.program ?? "");
-const FINAL_REGISTRATION_STATUSES = new Set(["registered", "approved", "locked", "graded"]);
-const getRegisteredCourseCodes = (studentId = "") => {
-  const studentKey = String(studentId ?? "").trim().toLowerCase();
-  const isFinalStatus = (value) => FINAL_REGISTRATION_STATUSES.has(String(value ?? "").trim().toLowerCase());
-  const isSameStudent = (item = {}) => {
-    if (!studentKey) return true;
-    const itemStudentKeys = [
-      item?.studentId,
-      item?.student_id,
-      item?.username,
-      item?.userId,
-      item?.user_id,
-      item?.ownerId,
-      item?.owner_id,
-    ]
-      .map((value) => String(value ?? "").trim().toLowerCase())
-      .filter(Boolean);
-    if (!itemStudentKeys.length) return false;
-    return itemStudentKeys.includes(studentKey);
-  };
-  const collectCodes = (rows = []) =>
-    rows
-      .filter((item) => isSameStudent(item) && isFinalStatus(item?.status))
-      .map((item) => String(item?.id || item?.code || item?.courseCode || item?.course_code || "").trim())
-      .filter(Boolean);
-
-  try {
-    const registrationRows = JSON.parse(localStorage.getItem("system.studentRegistrations") || "[]");
-    const selectedRows = JSON.parse(localStorage.getItem("selectedCourses") || "[]");
-    const fromRegistrations = Array.isArray(registrationRows) ? collectCodes(registrationRows) : [];
-    const fromSelected = Array.isArray(selectedRows) ? collectCodes(selectedRows) : [];
-    return Array.from(new Set([...fromRegistrations, ...fromSelected]));
-  } catch {
-    return [];
-  }
-};
-
 /** Entry App Component */
 const App = () => {
   const { t } = useTranslation("global");
@@ -480,7 +440,6 @@ const App = () => {
       name: parsed?.name || t("academic_reg_student_default"),
       id: parsed?.username || parsed?.studentId || "-",
       major: parsed?.college || parsed?.major || "-",
-      collegeId: getUserCollegeKey(parsed || {}),
     };
   });
 
@@ -492,7 +451,6 @@ const App = () => {
         name: parsed?.name || t("academic_reg_student_default"),
         id: parsed?.username || parsed?.studentId || "-",
         major: parsed?.college || parsed?.major || "-",
-        collegeId: getUserCollegeKey(parsed || {}),
       });
     };
 
@@ -505,28 +463,16 @@ const App = () => {
 
   const refresh = useCallback(async () => {
     try {
-      const registeredCourseCodes = getRegisteredCourseCodes(user.id);
       const [quizData, submissionsData] = await Promise.all([
-        listQuizzesScoped({ collegeId: user.collegeId }),
+        listQuizzes(),
         listMyQuizResults(),
       ]);
-      const safeQuizzes = Array.isArray(quizData) ? quizData : [];
-      const filteredQuizzes = safeQuizzes.filter((quiz) => {
-        const hasScopeData = Boolean(quiz?.visibility || quiz?.collegeId || quiz?.college_id);
-        const visibility = String(hasScopeData ? (quiz.visibility || "college") : "global").toLowerCase();
-        const quizCollegeKey = normalizeTextKey(quiz.collegeId);
-        const collegeAllowed = visibility === "global" || !user.collegeId || !quizCollegeKey || quizCollegeKey === user.collegeId;
-        if (!collegeAllowed) return false;
-        if (!quiz.courseCode) return true;
-        if (!registeredCourseCodes.length) return false;
-        return registeredCourseCodes.includes(String(quiz.courseCode).trim());
-      });
-      setQuizzes(filteredQuizzes);
+      setQuizzes(Array.isArray(quizData) ? quizData : []);
       setSubmissions(Array.isArray(submissionsData) ? submissionsData : []);
     } catch {
       // Keep current UI state if backend is temporarily unavailable.
     }
-  }, [user.collegeId, user.id]);
+  }, []);
 
   useEffect(() => {
     const init = setTimeout(() => {
