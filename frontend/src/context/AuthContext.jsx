@@ -25,6 +25,14 @@ const withToken = (url, token) => {
   return `${raw}${join}token=${encodeURIComponent(t)}`;
 };
 
+const normalizeApiBase = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("localhost") || value.startsWith("127.0.0.1")) return `http://${value}`;
+  return `https://${value}`;
+};
+
 const normalizeProfilePhotoUrl = (url, token = "") => {
   const raw = String(url || "").trim();
   if (!raw) return "";
@@ -32,7 +40,7 @@ const normalizeProfilePhotoUrl = (url, token = "") => {
     return withToken(raw, token);
   }
   if (raw.startsWith("/api/")) {
-    const apiBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+    const apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE_URL || "");
     if (apiBase) return withToken(`${apiBase}${raw}`, token);
   }
   return withToken(raw, token);

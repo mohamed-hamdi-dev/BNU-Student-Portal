@@ -111,7 +111,7 @@ export const listProfilePhotosForReview = async (params = {}) => {
 };
 
 export const exportProfileCardPack = async (params = {}) => {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
+  const API_BASE_URL = API_BASE;
   const token = localStorage.getItem("access_token") || "";
   const search = new URLSearchParams();
   search.set("college", String(params.college || ""));
@@ -145,7 +145,7 @@ export const exportProfileCardPack = async (params = {}) => {
 };
 
 export const buildProfileCardExportUrl = (params = {}) => {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
+  const API_BASE_URL = API_BASE;
   const token = localStorage.getItem("access_token") || "";
   const search = new URLSearchParams();
   search.set("college", String(params.college || ""));
