@@ -102,6 +102,25 @@ async def _send_account_credentials_email(email: str, username: str, temp_passwo
     )
 
 
+async def _send_account_update_email(email: str, username: str, university_email: str, temp_password: str | None = None):
+    password_block = (
+        f"<p><strong>Updated Password:</strong> {temp_password}</p>"
+        "<p>Please login using the new password.</p>"
+        if str(temp_password or "").strip()
+        else "<p>Your account data has been updated successfully.</p>"
+    )
+    return await send_email(
+        to=email,
+        subject="BNU Portal - Account Details Updated",
+        html=(
+            "<p>Your university portal account details were updated by the administration.</p>"
+            f"<p><strong>Username:</strong> {username}</p>"
+            f"<p><strong>University Email:</strong> {university_email}</p>"
+            f"{password_block}"
+        ),
+    )
+
+
 def _current_academic_start_year(now_value: datetime | None = None) -> int:
     now_utc = now_value or datetime.now(timezone.utc)
     # Academic year starts in September and ends in June.
@@ -453,6 +472,13 @@ def _serialize_photo(row: UserProfilePhoto, user: User | None = None) -> UserPro
         reviewedAt=row.reviewed_at,
         reviewedBy=row.reviewed_by,
     )
+
+
+def _build_user_admin_payload(user: User, db: Session) -> dict:
+    payload = UserAdminResponse.model_validate(user).model_dump(mode="json")
+    contact_row = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+    payload["recovery_email"] = contact_row.recovery_email if contact_row and contact_row.recovery_email else None
+    return payload
 
 
 def _normalize_photo_status_filter(value: str | None) -> str:
@@ -1025,7 +1051,8 @@ async def read_users(
             )
         )
 
-    return query.offset(skip).limit(limit).all()
+    rows = query.offset(skip).limit(limit).all()
+    return [_build_user_admin_payload(user, db) for user in rows]
 
 
 # â”€â”€ 3. Get User By ID (Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1035,7 +1062,7 @@ async def read_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return _build_user_admin_payload(user, db)
 
 
 # â”€â”€ 4. Create User (Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1122,7 +1149,7 @@ async def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
             # Keep user creation successful even if email sending fails.
             print(f"Credentials email send failed for {db_user.email}: {exc}")
 
-    return db_user
+    return _build_user_admin_payload(db_user, db)
 
 
 # â”€â”€ 5. Update User (Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1177,7 +1204,24 @@ async def update_user(user_id: int, user_in: UserUpdate, db: Session = Depends(g
         db.commit()
 
     db.refresh(user)
-    return user
+
+    target_email = recovery_email
+    if target_email is None:
+        contact_row = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
+        target_email = contact_row.recovery_email if contact_row and contact_row.recovery_email else None
+
+    if target_email:
+        try:
+            await _send_account_update_email(
+                email=str(target_email).strip().lower(),
+                username=str(user.username or "").strip(),
+                university_email=str(user.email or "").strip(),
+                temp_password=str(user_in.password or "").strip() or None,
+            )
+        except Exception as exc:
+            print(f"Account update email send failed for {target_email}: {exc}")
+
+    return _build_user_admin_payload(user, db)
 
 
 # â”€â”€ 6. Delete User (Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

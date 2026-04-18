@@ -120,6 +120,17 @@ const isCourseMatchingActiveYear = (courseYear, activeYear) => {
     return Boolean(rawCourseYear) && rawCourseYear === rawActiveYear;
 };
 
+const isCourseEligibleForStudyYear = (courseYear, studentYear) => {
+    const normalizedCourseYear = normalizeAcademicYearValue(courseYear, "");
+    const normalizedStudentYear = normalizeAcademicYearValue(studentYear, "");
+    if (!normalizedCourseYear || !normalizedStudentYear) return true;
+
+    const courseYearNumber = Number(normalizedCourseYear);
+    const studentYearNumber = Number(normalizedStudentYear);
+    if (!Number.isFinite(courseYearNumber) || !Number.isFinite(studentYearNumber)) return true;
+    return courseYearNumber <= studentYearNumber;
+};
+
 const toNumber = (value, fallback = NaN) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
@@ -671,9 +682,27 @@ export default function SystemContextProvider({ children }) {
         if (!studentId || !courseCode || !semesterId) return { ok: true };
 
         const passedCodes = getPassedCourseCodesForStudent(studentId);
-        const allowRetake = Boolean(registrationSettings?.allowRetakeForImprovement);
-        if (!allowRetake && passedCodes.has(courseCode)) {
+        if (passedCodes.has(courseCode)) {
             return { ok: false, error: `المقرر ${courseCode} مجتاز بالفعل.` };
+        }
+
+        const studentYear = normalizeAcademicYearValue(
+            student?.current_study_year || student?.currentStudyYear || student?.academicYear || student?.year || student?.level,
+            ""
+        );
+        const courseYear = normalizeAcademicYearValue(course?.year || course?.study_year, "");
+        if (!isCourseEligibleForStudyYear(courseYear, studentYear)) {
+            return { ok: false, error: `ظ„ط§ ظٹظ…ظƒظ† طھط³ط¬ظٹظ„ ${courseCode} ظ„أظ†ظ‡ ظ…ظ† ط³ظ†ط© ط¯ط±ط§ط³ظٹط© ظ…ط³طھظ‚ط¨ظ„ظٹط©.` };
+        }
+
+        const sameTermDuplicate = (Array.isArray(existingRegistrations) ? existingRegistrations : []).some(
+            (item) =>
+                normalizeStudentIdKey(item?.studentId || item?.student_id) === studentId &&
+                String(item?.semester || "").trim() === semesterId &&
+                normalizeCourseCode(item?.id || item?.code) === courseCode
+        );
+        if (sameTermDuplicate) {
+            return { ok: false, error: `ط§ظ„ظ…ظ‚ط±ط± ${courseCode} ظ…ط³ط¬ظ„ ط¨ط§ظ„ظپط¹ظ„ ظپظٹ ظ†ظپط³ ط§ظ„ظپطµظ„.` };
         }
 
         if (registrationSettings?.enforcePrerequisites) {
@@ -747,13 +776,20 @@ export default function SystemContextProvider({ children }) {
 
         const strictMatches = semesterScopedCourses.filter((course) => {
             const hasCourseYear = Boolean(String(course.year || "").trim());
-            const isMatchingYear = !hasCourseYear || !studentYear || isCourseMatchingActiveYear(course.year, studentYear);
+            const isMatchingYear = !hasCourseYear || !studentYear || isCourseEligibleForStudyYear(course.year, studentYear);
             const courseCollegeKeys = getCourseCollegeKeys(course);
             const isMatchingCollege = hasCollegeIntersection(studentCollegeKeys, courseCollegeKeys);
             const courseTrackKey = getCourseTrackKey(course);
             const isGeneralCourse = !courseTrackKey;
             const isTrackMatched = !isBranchingActive || isGeneralCourse || (studentTrackKey && courseTrackKey === studentTrackKey);
-            return isMatchingYear && isMatchingCollege && isTrackMatched;
+            if (!(isMatchingYear && isMatchingCollege && isTrackMatched)) return false;
+            const guard = canStudentRegisterCourse({
+                student,
+                course,
+                semester: course.semester,
+                existingRegistrations: studentRegistrations,
+            });
+            return guard.ok;
         });
 
         if (strictMatches.length > 0) return strictMatches;

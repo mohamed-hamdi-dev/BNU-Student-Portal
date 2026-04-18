@@ -89,6 +89,7 @@ class UserAdminResponse(UserProfileResponse):
     nationality: str | None = None
     gender: str | None = None
     birth_place: str | None = None
+    recovery_email: EmailStr | None = None
 
     class Config:
         from_attributes = True

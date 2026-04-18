@@ -953,6 +953,26 @@ def _apply_registration_request_selections(
         )
         .all()
     )
+    existing_active_course_ids: set[int] = {
+        int(course.id)
+        for _selection, _offering, course in existing_active_rows
+        if course and course.id is not None
+    }
+    duplicate_same_term_course_ids = selected_course_ids.intersection(existing_active_course_ids)
+    if duplicate_same_term_course_ids:
+        duplicate_course = next(
+            (
+                course_map[offering_id]
+                for offering_id in unique_offering_ids
+                if int(course_map[offering_id].id) in duplicate_same_term_course_ids
+            ),
+            None,
+        )
+        duplicate_code = duplicate_course.code if duplicate_course else "selected course"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Course {duplicate_code} is already registered in this term",
+        )
     selected_offering_payloads = [
         {
             "offering_id": int(offering.id),
@@ -1024,6 +1044,21 @@ def _apply_registration_request_selections(
         )
 
     passed_course_ids, grades_by_course = _build_passed_course_sets(db, req.student_user_id)
+    already_passed_course_ids = selected_course_ids.intersection(passed_course_ids)
+    if already_passed_course_ids:
+        passed_course = next(
+            (
+                course_map[offering_id]
+                for offering_id in unique_offering_ids
+                if int(course_map[offering_id].id) in already_passed_course_ids
+            ),
+            None,
+        )
+        passed_code = passed_course.code if passed_course else "selected course"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Course {passed_code} was already passed and cannot be registered again",
+        )
     for offering_id in unique_offering_ids:
         course = course_map[offering_id]
         _validate_prerequisites_for_course(
@@ -1070,8 +1105,15 @@ def _validate_offering_for_student(db: Session, offering: CourseOffering, profil
         raise HTTPException(status_code=400, detail="Invalid offering course")
     if course.college_id and profile.college_id and course.college_id != profile.college_id:
         raise HTTPException(status_code=400, detail=f"Course {course.code} belongs to another college")
-    if course.study_year and profile.current_study_year != course.study_year:
-        raise HTTPException(status_code=400, detail=f"Course {course.code} is not in student's current year")
+    if (
+        course.study_year is not None
+        and profile.current_study_year is not None
+        and int(course.study_year) > int(profile.current_study_year)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Course {course.code} is in a future study year and is not yet eligible",
+        )
 
     college = db.query(College).filter(College.id == profile.college_id).first() if profile.college_id else None
     if not college or not college.branching_start_year:
