@@ -1139,15 +1139,16 @@ async def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
 
     # Send initial credentials email for students when SMTP is configured.
     if _normalize_text_key(user_in.role) == "student":
+        target_email = str(recovery_email or db_user.email or "").strip().lower()
         try:
             await _send_account_credentials_email(
-                email=str(db_user.email or "").strip(),
+                email=target_email,
                 username=str(db_user.username or "").strip(),
                 temp_password=str(user_in.password or "").strip(),
             )
         except Exception as exc:
             # Keep user creation successful even if email sending fails.
-            print(f"Credentials email send failed for {db_user.email}: {exc}")
+            print(f"Credentials email send failed for {target_email or db_user.email}: {exc}")
 
     return _build_user_admin_payload(db_user, db)
 
