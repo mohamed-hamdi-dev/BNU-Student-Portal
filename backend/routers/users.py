@@ -1170,8 +1170,13 @@ async def update_user(user_id: int, user_in: UserUpdate, db: Session = Depends(g
         del update_data["password"]
         update_data["password_hash"] = hashed_password
         update_data["password_history_json"] = json.dumps([hashed_password], ensure_ascii=False)
-        update_data["must_change_password"] = False
-        update_data["password_changed_at"] = datetime.now(timezone.utc)
+        target_role = _normalize_text_key(update_data.get("role", user.role))
+        if target_role == "student":
+            update_data["must_change_password"] = True
+            update_data["password_changed_at"] = None
+        else:
+            update_data["must_change_password"] = False
+            update_data["password_changed_at"] = datetime.now(timezone.utc)
 
     merged_preview = {
         "role": update_data.get("role", user.role),
