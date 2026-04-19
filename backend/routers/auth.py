@@ -130,6 +130,13 @@ def _normalize_role_value(value: str | None) -> str:
     return "student"
 
 
+def _hash_otp_value(email: str, otp: str) -> str:
+    import hashlib
+
+    material = f"{str(email or '').strip().lower()}|{otp}|{settings.OTP_SECRET}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
 def _normalize_theme_value(value: str | None) -> str:
     raw = str(value or "").strip().lower()
     if raw in {"light", "dark", "system"}:
@@ -404,9 +411,7 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid recovery data")
 
     otp_code = f"{secrets.randbelow(1_000_000):06d}"
-    material = f"{recovery_email}|{otp_code}|{settings.OTP_SECRET}".encode("utf-8")
-    import hashlib
-    otp_hash = hashlib.sha256(material).hexdigest()
+    otp_hash = _hash_otp_value(recovery_email, otp_code)
 
     expiry = datetime.now(timezone.utc) + timedelta(seconds=settings.OTP_TTL_SECONDS)
     db_otp = OTPModel(
@@ -455,17 +460,13 @@ async def verify_otp(body: OTPVerify, db: Session = Depends(get_db)):
 
     user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
     email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").lower()
-    material = f"{email}|{body.otp}|{settings.OTP_SECRET}".encode("utf-8")
-    import hashlib
-    computed_hash = hashlib.sha256(material).hexdigest()
+    computed_hash = _hash_otp_value(email, body.otp)
 
     if computed_hash != record.otp_hash:
         record.attempts += 1
         db.commit()
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
-    record.is_used = True
-    db.commit()
     return {"verified": True}
 
 
@@ -479,20 +480,26 @@ async def reset_password(body: ResetPassword, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid request ID")
 
     record = db.query(OTPModel).filter(OTPModel.id == req_id).first()
-    if not record:
-        raise HTTPException(status_code=400, detail="Invalid request ID")
+    if not record or record.is_used:
+        raise HTTPException(status_code=400, detail="Invalid or used request ID")
 
     user = db.query(User).filter(User.id == record.user_id).first()
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
 
+    if datetime.now(timezone.utc) > record.expires_at:
+        raise HTTPException(status_code=400, detail="OTP expired")
+
+    if record.attempts >= settings.OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=400, detail="Too many attempts")
+
     user_contact = db.query(UserContactSettings).filter(UserContactSettings.user_id == user.id).first()
     email = str((user_contact.recovery_email if user_contact and user_contact.recovery_email else user.email) or "").lower()
-    material = f"{email}|{body.otp}|{settings.OTP_SECRET}".encode("utf-8")
-    import hashlib
-    computed_hash = hashlib.sha256(material).hexdigest()
+    computed_hash = _hash_otp_value(email, body.otp)
 
     if computed_hash != record.otp_hash:
+        record.attempts += 1
+        db.commit()
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
     current_hash = str(user.password_hash or "")

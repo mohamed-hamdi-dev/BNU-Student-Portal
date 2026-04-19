@@ -1,7 +1,13 @@
 """Auth Pydantic schemas."""
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from datetime import datetime
+
+
+def _require_single_string(value, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a single string value")
+    return value.strip()
 
 
 # ── Tokens ────────────────────────────────────────────────────────────
@@ -33,16 +39,38 @@ class OTPRequest(BaseModel):
     national_id: str | None = None
     email: EmailStr
 
+    @field_validator("student_code", "national_id", mode="before")
+    @classmethod
+    def validate_recovery_lookup_fields(cls, value, info):
+        if value is None:
+            return None
+        return _require_single_string(value, info.field_name)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def validate_email(cls, value):
+        return _require_single_string(value, "email").lower()
+
 
 class OTPVerify(BaseModel):
     request_id: str  # For correlating the request if needed, or email
     otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+    @field_validator("request_id", "otp", mode="before")
+    @classmethod
+    def validate_single_string_fields(cls, value, info):
+        return _require_single_string(value, info.field_name)
 
 
 class ResetPassword(BaseModel):
     request_id: str
     otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
     new_password: str = Field(..., min_length=6)
+
+    @field_validator("request_id", "otp", "new_password", mode="before")
+    @classmethod
+    def validate_single_string_fields(cls, value, info):
+        return _require_single_string(value, info.field_name)
 
 
 class AccountRequestCreate(BaseModel):
@@ -51,6 +79,16 @@ class AccountRequestCreate(BaseModel):
     college: str = Field(..., min_length=2)
     level: str = Field(..., min_length=1)
     email: EmailStr
+
+    @field_validator("full_name", "national_id", "college", "level", mode="before")
+    @classmethod
+    def validate_account_request_strings(cls, value, info):
+        return _require_single_string(value, info.field_name)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def validate_account_request_email(cls, value):
+        return _require_single_string(value, "email").lower()
 
 
 class AccountRequestReview(BaseModel):
