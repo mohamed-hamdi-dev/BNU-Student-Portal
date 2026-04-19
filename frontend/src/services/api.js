@@ -36,6 +36,22 @@ const API_BASE = resolveApiBase();
 const CHAT_CACHE_KEYS = ["campusAssistantChats", "campusAssistantActiveChat"];
 const SESSION_NOTICE_KEY = "session_expired_notice";
 
+function normalizeSessionNotice(detail) {
+  const raw = String(detail || "").trim();
+  const lowered = raw.toLowerCase();
+  if (!raw) return "انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.";
+  if (
+    lowered.includes("invalid or expired token")
+    || lowered.includes("token expired")
+    || lowered.includes("expired token")
+    || lowered.includes("could not validate credentials")
+    || lowered.includes("not authenticated")
+  ) {
+    return "انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.";
+  }
+  return raw;
+}
+
 function withLoopbackFallback(url) {
   const urls = [url];
 
@@ -156,7 +172,7 @@ export async function apiFetch(path, options = {}) {
   if (res.status === 401 && path !== "/api/auth/login") {
     const errBody = await res.json().catch(() => ({}));
     const detail = normalizeApiErrorDetail(errBody?.detail, res.status);
-    const normalizedDetail = String(detail || "").trim();
+    const normalizedDetail = normalizeSessionNotice(detail);
     if (normalizedDetail) {
       localStorage.setItem(SESSION_NOTICE_KEY, normalizedDetail);
     } else {
