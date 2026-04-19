@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Bot, Calculator, Download, ExternalLink, GraduationCap, Home, Layers, MapPin, Maximize2, Menu, MessageCircle, Mic, Monitor, Search, Send, Smartphone, Star, Tablet, Trash2, Upload, User, X } from "lucide-react";
 import { LuAudioLines } from "react-icons/lu";
-import { MdAccountBalance, MdBusinessCenter, MdDoorFront, MdLocalHospital, MdLocalLibrary, MdLocalParking, MdMyLocation, MdLocationCity } from "react-icons/md";
+import { MdAccountBalance, MdBusinessCenter, MdDoorFront, MdLocalHospital, MdLocalLibrary, MdLocalParking, MdMyLocation, MdSchool } from "react-icons/md";
 import { Controller, useForm } from "react-hook-form";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -1785,7 +1785,7 @@ const campusCategoryStyles = {
     from: "#6366f1",
     to: "#3730a3",
     ringColor: "rgba(99,102,241,0.20)",
-    icon: markerIconFromReactIcon(MdLocationCity),
+    icon: markerIconFromReactIcon(MdSchool),
   },
   admin: {
     from: "#a855f7",
@@ -1821,13 +1821,25 @@ const campusCategoryStyles = {
 const campusIconByKey = {
   business: MdBusinessCenter,
   door: MdDoorFront,
-  school: MdLocationCity,
-  university: MdLocationCity,
+  school: MdSchool,
+  university: MdSchool,
   bank: MdAccountBalance,
   library: MdLocalLibrary,
   hospital: MdLocalHospital,
   parking: MdLocalParking,
   my_location: MdMyLocation,
+};
+const escapeMarkerHtml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+const shortMarkerLabel = (value, limit = 18) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.length > limit ? `${text.slice(0, limit).trim()}…` : text;
 };
 const resolveCampusMarkerInnerIcon = (category = "service", iconKey = "") => {
   const style = campusCategoryStyles[category] || campusCategoryStyles.service;
@@ -1842,20 +1854,58 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
   const innerIcon = resolveCampusMarkerInnerIcon(category, options.iconKey);
   const isSelected = Boolean(options.selected);
   const isUser = category === "user" || Boolean(options.user);
+  const markerCode = isUser ? "" : String(options.code || "").trim().toUpperCase();
+  const markerLabel = isUser ? "" : shortMarkerLabel(options.label || "");
+  const markerWidth = markerLabel ? 120 : 40;
+  const markerHeight = markerLabel || markerCode ? 82 : 50;
 
   return L.divIcon({
-    className: "campus-marker-wrapper",
+    className: "campus-marker-wrapper campus-marker",
     html: `
       <div
+        class="campus-marker-shell"
         style="
           position: relative;
-          width: 34px;
-          height: 46px;
+          width: ${markerWidth}px;
+          height: ${markerHeight}px;
           display: flex;
-          align-items: flex-start;
+          flex-direction: column;
+          align-items: center;
           justify-content: center;
         "
       >
+        ${
+          markerCode
+            ? `
+          <span
+            class="campus-marker-code"
+            style="
+              margin-bottom: 4px;
+              padding: 2px 8px;
+              border-radius: 999px;
+              background: rgba(255,255,255,0.96);
+              color: ${style.to};
+              border: 1px solid rgba(148, 163, 184, 0.28);
+              box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
+              font-size: 10px;
+              line-height: 1.2;
+              font-weight: 900;
+              letter-spacing: .04em;
+            "
+          >${escapeMarkerHtml(markerCode)}</span>
+        `
+            : ""
+        }
+        <div
+          style="
+            position: relative;
+            width: 40px;
+            height: 46px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+          "
+        >
         ${
           isSelected || isUser
             ? `
@@ -1863,8 +1913,8 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
             style="
               position: absolute;
               top: -3px;
-              width: 34px;
-              height: 34px;
+              width: 36px;
+              height: 36px;
               border-radius: 999px;
               background: ${style.ringColor};
               transform: scale(1.25);
@@ -1881,7 +1931,7 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
             z-index: 2;
             width: 34px;
             height: 34px;
-            border-radius: 12px;
+            border-radius: 14px;
             background: linear-gradient(135deg, ${style.from}, ${style.to});
             border: 2px solid rgba(255,255,255,0.95);
             display: flex;
@@ -1906,10 +1956,37 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
             z-index: 1;
           "
         ></span>
+        </div>
+        ${
+          markerLabel
+            ? `
+          <div
+            class="campus-marker-label"
+            style="
+              margin-top: 6px;
+              max-width: 120px;
+              padding: 3px 8px;
+              border-radius: 999px;
+              background: rgba(255,255,255,0.96);
+              border: 1px solid rgba(148, 163, 184, 0.24);
+              box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+              color: #0f172a;
+              font-size: 10px;
+              line-height: 1.25;
+              font-weight: 800;
+              text-align: center;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            "
+          >${escapeMarkerHtml(markerLabel)}</div>
+        `
+            : ""
+        }
       </div>
     `,
-    iconSize: [34, 46],
-    iconAnchor: [17, 40],
+    iconSize: [markerWidth, markerHeight],
+    iconAnchor: [markerWidth / 2, markerCode || markerLabel ? 54 : 40],
     popupAnchor: [0, -28],
   });
 };
@@ -2235,7 +2312,7 @@ function MapComponent() {
           />
         )}
         {filtered.map((p) => (
-          <Marker key={p.id} position={p.position} icon={createCampusMarkerIcon(p.category, { selected: selectedPlace?.id === p.id, iconKey: p.icon_key })}>
+          <Marker key={p.id} position={p.position} icon={createCampusMarkerIcon(p.category, { selected: selectedPlace?.id === p.id, iconKey: p.icon_key, label: p.name, code: p.building_code })}>
             <Popup>
               <div dir="rtl" className="min-w-[190px]">
                 <p className="font-bold">{formatPlaceLabel(p)}</p>
@@ -2267,7 +2344,7 @@ function MapComponent() {
             />
           </>
         )}
-        {destination && <Marker position={destination} icon={createCampusMarkerIcon(selectedPlace?.category || "service", { selected: true, iconKey: selectedPlace?.icon_key })}><Popup>{selectedPlace ? formatPlaceLabel(selectedPlace) : t("chatbot_destination")}</Popup></Marker>}
+        {destination && <Marker position={destination} icon={createCampusMarkerIcon(selectedPlace?.category || "service", { selected: true, iconKey: selectedPlace?.icon_key, label: selectedPlace?.name, code: selectedPlace?.building_code })}><Popup>{selectedPlace ? formatPlaceLabel(selectedPlace) : t("chatbot_destination")}</Popup></Marker>}
         {userPosition && destination && <Routing from={userPosition} to={destination} setRouteInfo={setRouteInfo} />}
       </MapContainer>
     </div>
