@@ -787,7 +787,9 @@ export default function SystemContextProvider({ children }) {
                 student,
                 course,
                 semester: course.semester,
-                existingRegistrations: studentRegistrations,
+                // Keep the catalog visible for eligible/open offerings.
+                // Final duplicate blocking still happens during add/save and in backend.
+                existingRegistrations: [],
             });
             return guard.ok;
         });
