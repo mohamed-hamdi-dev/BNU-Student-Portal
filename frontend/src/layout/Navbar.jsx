@@ -20,6 +20,7 @@ export default function App() {
     const [openMenu, setOpenMenu] = useState(false);
     const [showWelcomeCard, setShowWelcomeCard] = useState(false);
     const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
+    const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
     const welcomeShownRef = useRef(false);
     const location = useLocation();
     const navigate = useNavigate();
@@ -34,7 +35,8 @@ export default function App() {
     const drawerAvatarWidth = Math.round(drawerAvatarSize * 0.8);
     const avatarObjectX = Math.max(0, Math.min(100, Number(user?.avatarObjectX ?? user?.avatar_object_x ?? 50) || 50));
     const avatarObjectY = Math.max(0, Math.min(100, Number(user?.avatarObjectY ?? user?.avatar_object_y ?? 50) || 50));
-    const effectiveProfilePhotoUrl = profilePhotoUrl || user?.profilePhotoUrl || "";
+    const accessToken = String(localStorage.getItem("access_token") || "").trim();
+    const effectiveProfilePhotoUrl = !profilePhotoFailed && accessToken ? (profilePhotoUrl || user?.profilePhotoUrl || "") : "";
 
     useEffect(() => {
         if (!user?.username) return;
@@ -55,20 +57,28 @@ export default function App() {
     }, [user?.username]);
 
     useEffect(() => {
+        if (!user?.username || !accessToken) {
+            setProfilePhotoUrl("");
+            setProfilePhotoFailed(false);
+            return;
+        }
         const loadProfilePhoto = async () => {
             try {
                 const row = await getMyDisplayProfilePhoto();
                 if (!row?.fileUrl) {
                     setProfilePhotoUrl("");
+                    setProfilePhotoFailed(false);
                     return;
                 }
                 setProfilePhotoUrl(withAccessToken(row.fileUrl, localStorage.getItem("access_token") || ""));
+                setProfilePhotoFailed(false);
             } catch {
                 setProfilePhotoUrl("");
+                setProfilePhotoFailed(false);
             }
         };
-        if (user?.username) loadProfilePhoto();
-    }, [user?.username]);
+        loadProfilePhoto();
+    }, [user?.username, accessToken]);
 
     useEffect(() => {
         setOpenMenu(false);
@@ -173,6 +183,7 @@ export default function App() {
                                             alt="profile"
                                             className="w-full h-full rounded-2xl object-contain bg-white"
                                             style={{ objectPosition: `${avatarObjectX}% ${avatarObjectY}%` }}
+                                            onError={() => setProfilePhotoFailed(true)}
                                         />
                                     ) : (
                                         user?.name?.charAt(0)
@@ -239,6 +250,7 @@ export default function App() {
                                     alt="profile"
                                     className="w-full h-full rounded-2xl object-contain bg-white"
                                     style={{ objectPosition: `${avatarObjectX}% ${avatarObjectY}%` }}
+                                    onError={() => setProfilePhotoFailed(true)}
                                 />
                             ) : (
                                 user?.name?.charAt(0)

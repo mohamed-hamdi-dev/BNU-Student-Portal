@@ -61,6 +61,14 @@ const getIconMeta = (category, iconKey) => {
   return iconMeta[key] || iconMeta.business;
 };
 
+const normalizeBuildingCode = (value) => String(value || "").trim().toUpperCase();
+
+const formatBuildingCodeLabel = (value, t) => {
+  const code = normalizeBuildingCode(value);
+  if (!code) return "";
+  return `${t("admin.places.table.buildingCode")} ${code}`;
+};
+
 export default function AdminCampusPlacesPage() {
   const { t } = useTranslation("admin");
   const [rows, setRows] = useState([]);
@@ -114,7 +122,7 @@ export default function AdminCampusPlacesPage() {
       const payload = {
         name: form.name.trim(),
         name_ar: form.name_ar.trim() || null,
-        building_code: form.building_code.trim() || null,
+        building_code: normalizeBuildingCode(form.building_code) || null,
         category: form.category.trim() || null,
         icon_key: getEffectiveIconKey(form.category, form.icon_key),
         latitude: toNumOrNull(form.latitude),
@@ -143,7 +151,7 @@ export default function AdminCampusPlacesPage() {
     setForm({
       name: item?.name || "",
       name_ar: item?.name_ar || "",
-      building_code: item?.building_code || "",
+      building_code: normalizeBuildingCode(item?.building_code || ""),
       category: item?.category || "service",
       icon_key: getEffectiveIconKey(item?.category || "service", item?.icon_key || ""),
       latitude: item?.latitude ?? "",
@@ -168,6 +176,7 @@ export default function AdminCampusPlacesPage() {
 
   const selectedIcon = getIconMeta(form.category, form.icon_key);
   const SelectedIcon = selectedIcon.Icon;
+  const buildingCodeLabel = formatBuildingCodeLabel(form.building_code, t);
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -182,7 +191,7 @@ export default function AdminCampusPlacesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <input value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2" placeholder={t("admin.places.nameEn")} />
           <input value={form.name_ar} onChange={(e) => setForm((s) => ({ ...s, name_ar: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2" placeholder={t("admin.places.nameAr")} />
-          <input value={form.building_code} onChange={(e) => setForm((s) => ({ ...s, building_code: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2" placeholder={t("admin.places.buildingCode")} />
+          <input value={form.building_code} onChange={(e) => setForm((s) => ({ ...s, building_code: normalizeBuildingCode(e.target.value) }))} className="rounded-xl border border-slate-200 px-3 py-2" placeholder={t("admin.places.buildingCode")} />
 
           <select
             value={form.category}
@@ -202,11 +211,16 @@ export default function AdminCampusPlacesPage() {
           </select>
 
           <div className="rounded-xl border border-slate-200 px-3 py-2 inline-flex items-center">
-            <div className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-700">
+            <div className="inline-flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-700">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-cyan-50 text-cyan-700">
                 <SelectedIcon size={16} />
               </span>
               <span>{t(selectedIcon.labelKey)}</span>
+              {buildingCodeLabel ? (
+                <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-cyan-700 shadow-sm">
+                  {buildingCodeLabel}
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -260,14 +274,22 @@ export default function AdminCampusPlacesPage() {
                 {filteredRows.map((item) => {
                   const icon = getIconMeta(item.category, item.icon_key);
                   const RowIcon = icon.Icon;
+                  const buildingLabel = formatBuildingCodeLabel(item.building_code, t);
                   return (
                     <tr key={item.id} className="border-t border-slate-100">
                       <td className="p-3 font-semibold">{item.id}</td>
                       <td className="p-3">
-                        <div className="font-semibold text-slate-800">{item.name_ar || item.name}</div>
+                        <div className="flex flex-wrap items-center gap-2 font-semibold text-slate-800">
+                          <span>{item.name_ar || item.name}</span>
+                          {buildingLabel ? (
+                            <span className="inline-flex items-center rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] font-black text-cyan-700">
+                              {buildingLabel}
+                            </span>
+                          ) : null}
+                        </div>
                         <div className="text-xs text-slate-500">{item.name}</div>
                       </td>
-                      <td className="p-3">{item.building_code || "-"}</td>
+                      <td className="p-3">{buildingLabel || "-"}</td>
                       <td className="p-3">{item.category || "-"}</td>
                       <td className="p-3">
                         <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700">

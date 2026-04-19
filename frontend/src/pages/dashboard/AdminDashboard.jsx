@@ -457,6 +457,8 @@ export default function AdminDashboard() {
     const [editingIndex, setEditingIndex] = useState(null);
     const [editForm, setEditForm] = useState({});
     const [usersList, setUsersList] = useState([]);
+    const [usersLoaded, setUsersLoaded] = useState(false);
+    const [usersLoadFailed, setUsersLoadFailed] = useState(false);
     const [pendingImport, setPendingImport] = useState(null);
     const [publishMap, setPublishMap] = useState(() => parseSafe(localStorage.getItem(GRADE_PUBLISH_STATUS_KEY) || "{}", {}));
     const [auditLog, setAuditLog] = useState(() => parseSafe(localStorage.getItem(GRADE_AUDIT_LOG_KEY) || "[]", []));
@@ -527,12 +529,16 @@ export default function AdminDashboard() {
     useEffect(() => {
         const loadUsers = async () => {
             try {
+                setUsersLoadFailed(false);
                 const token = localStorage.getItem("access_token") || "";
                 const res = await fetch(`${API_BASE_URL}/api/users`, {
                     headers: token ? { Authorization: `Bearer ${token}` } : {},
                 });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) return;
+                if (!res.ok) {
+                    setUsersLoadFailed(true);
+                    return;
+                }
                 const parsedUsers = Array.isArray(data)
                     ? data
                     : Array.isArray(data.users)
@@ -542,7 +548,10 @@ export default function AdminDashboard() {
                     : [];
                 setUsersList(parsedUsers);
             } catch {
+                setUsersLoadFailed(true);
                 setUsersList([]);
+            } finally {
+                setUsersLoaded(true);
             }
         };
         loadUsers();
@@ -832,9 +841,16 @@ export default function AdminDashboard() {
                         role: linkedUser?.role || row.role || "student",
                     };
                 })
+                .filter((row) => {
+                    if (!usersLoaded || usersLoadFailed) return true;
+                    const sid = normalizeStudentId(row.studentId || "");
+                    const uname = String(row.username || "");
+                    const linkedUser = usersLookup.get(`studentId:${sid}`) || usersLookup.get(`username:${uname}`) || null;
+                    return Boolean(linkedUser);
+                })
                 .filter((row) => String(row.role || "").toLowerCase() !== "admin")
                 .filter((row) => isRowEligibleForGradesView(row)),
-        [allData, usersLookup, officialNameByStudentId]
+        [allData, usersLookup, officialNameByStudentId, usersLoaded, usersLoadFailed]
     );
 
     const filteredData = useMemo(() => {

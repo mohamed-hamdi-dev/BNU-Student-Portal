@@ -33,6 +33,7 @@ export default function AdminPortalLayout() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
     const [liveChatUnreadCount, setLiveChatUnreadCount] = useState(0);
+    const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
 
     const location = useLocation();
     const navigate = useNavigate();
@@ -42,7 +43,8 @@ export default function AdminPortalLayout() {
     const isRTL = String(i18n.language || "ar").toLowerCase().startsWith("ar");
     const displayName = currentUser?.name || currentUser?.username || t("default_user");
     const displayUsername = currentUser?.username || currentUser?.id || "-";
-    const profilePhotoUrl = withAccessToken(currentUser?.profilePhotoUrl || "", localStorage.getItem("access_token") || "");
+    const accessToken = String(localStorage.getItem("access_token") || "").trim();
+    const profilePhotoUrl = !profilePhotoFailed && accessToken ? withAccessToken(currentUser?.profilePhotoUrl || "", accessToken) : "";
 
     const avatarLetters = (displayName || "Admin User")
         .trim()
@@ -89,6 +91,10 @@ export default function AdminPortalLayout() {
         window.addEventListener("resize", handleResize);
         return () => window.removeEventListener("resize", handleResize);
     }, []);
+
+    useEffect(() => {
+        setProfilePhotoFailed(false);
+    }, [currentUser?.profilePhotoUrl, accessToken]);
 
     useEffect(() => {
         if (!canAccessLiveChat) {
@@ -169,7 +175,7 @@ export default function AdminPortalLayout() {
                         <div className={`px-4 py-3 border-b text-xs ${isDarkMode ? "border-slate-800 text-slate-300" : "border-slate-200 text-slate-500"}`}>
                             <div className="flex items-center gap-3">
                                 <div className={`w-10 h-10 rounded-xl border overflow-hidden flex items-center justify-center font-black ${isDarkMode ? "border-slate-700 bg-cyan-600 text-white" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
-                                    {profilePhotoUrl ? <img src={profilePhotoUrl} alt="profile" className="w-full h-full object-cover" /> : avatarLetters}
+                                    {profilePhotoUrl ? <img src={profilePhotoUrl} alt="profile" className="w-full h-full object-cover" onError={() => setProfilePhotoFailed(true)} /> : avatarLetters}
                                 </div>
                                 <div>
                                     <p className={`font-black ${isDarkMode ? "text-white" : "text-slate-800"}`}>{displayName}</p>
@@ -302,7 +308,7 @@ export default function AdminPortalLayout() {
                                 </>
                             )}
                             <div className={`w-8 h-8 rounded-lg border overflow-hidden flex items-center justify-center font-black ${isDarkMode ? "border-slate-700 bg-cyan-600 text-white" : "border-slate-200 bg-sky-100 text-sky-700"}`}>
-                                {profilePhotoUrl ? <img src={profilePhotoUrl} alt="profile" className="w-full h-full object-cover" /> : avatarLetters}
+                                {profilePhotoUrl ? <img src={profilePhotoUrl} alt="profile" className="w-full h-full object-cover" onError={() => setProfilePhotoFailed(true)} /> : avatarLetters}
                             </div>
                             <div className="hidden sm:flex flex-col leading-tight">
                                 <span className={`font-bold ${isDarkMode ? "text-slate-100" : "text-slate-700"}`}>{displayName}</span>

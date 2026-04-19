@@ -138,6 +138,64 @@ def _generate_student_code(db: Session, *, college_value: str | None, level_valu
     bbb = str(batch_num if batch_num > 0 else 0).zfill(2)
 
     prefix = f"BNU-{ccc}-{bbb}-"
+
+
+def _normalize_legacy_student_key(value) -> str:
+    return str(value or "").strip().lower()
+
+
+def _legacy_user_identifier_keys(user: User) -> set[str]:
+    candidates = {
+        user.id,
+        user.username,
+        user.student_code,
+        user.email,
+    }
+    return {_normalize_legacy_student_key(item) for item in candidates if str(item or "").strip()}
+
+
+def _row_belongs_to_deleted_user(row: dict, owner_keys: set[str]) -> bool:
+    if not isinstance(row, dict) or not owner_keys:
+        return False
+    candidate_fields = (
+        row.get("studentId"),
+        row.get("student_id"),
+        row.get("studentCode"),
+        row.get("student_code"),
+        row.get("username"),
+        row.get("userId"),
+        row.get("user_id"),
+        row.get("email"),
+    )
+    return any(_normalize_legacy_student_key(value) in owner_keys for value in candidate_fields if str(value or "").strip())
+
+
+def _cleanup_legacy_academic_state_for_user(db: Session, user: User) -> None:
+    owner_keys = _legacy_user_identifier_keys(user)
+    if not owner_keys:
+        return
+
+    state = db.query(AcademicState).filter(AcademicState.id == 1).first()
+    if not state:
+        return
+
+    try:
+        registrations = json.loads(state.student_registrations_json or "[]")
+    except (TypeError, ValueError):
+        registrations = []
+    try:
+        records = json.loads(state.academic_records_json or "[]")
+    except (TypeError, ValueError):
+        records = []
+
+    next_registrations = [row for row in registrations if not _row_belongs_to_deleted_user(row, owner_keys)]
+    next_records = [row for row in records if not _row_belongs_to_deleted_user(row, owner_keys)]
+
+    if len(next_registrations) == len(registrations) and len(next_records) == len(records):
+        return
+
+    state.student_registrations_json = json.dumps(next_registrations, ensure_ascii=False)
+    state.academic_records_json = json.dumps(next_records, ensure_ascii=False)
     existing = db.query(User.student_code).filter(User.student_code.like(f"{prefix}%")).all()
     max_suffix = 0
     for (student_code,) in existing:
@@ -1273,6 +1331,7 @@ async def delete_user(
         db.query(ConversationRating).filter(ConversationRating.student_id == user_id).delete(synchronize_session=False)
         db.query(ChatbotSession).filter(ChatbotSession.student_id == user_id).delete(synchronize_session=False)
         db.query(Conversation).filter(Conversation.student_id == user_id).delete(synchronize_session=False)
+        _cleanup_legacy_academic_state_for_user(db, user)
 
         db.delete(user)
         db.commit()
