@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useEffect, useMemo, useRef, useState
 import { apiFetch } from "../services/api";
 import { normalizeAcademicYearValue } from "../utils/academicData";
 import { getMyTrackSelectionStatus } from "../services/trackSelectionApi";
-import { getMyApprovedProfilePhoto } from "../services/profilePhotoApi";
+import { getMyDisplayProfilePhoto } from "../services/profilePhotoApi";
 
 export const AuthContext = createContext(null);
 
@@ -220,11 +220,11 @@ export default function AuthContextProvider({ children }) {
           // Contact settings sync is optional during login.
         }
         try {
-          const approvedPhoto = await getMyApprovedProfilePhoto();
-          if (approvedPhoto?.fileUrl) {
+          const profilePhoto = await getMyDisplayProfilePhoto();
+          if (profilePhoto?.fileUrl) {
             normalized = normalizeUser({
               ...normalized,
-              profilePhotoUrl: approvedPhoto.fileUrl,
+              profilePhotoUrl: profilePhoto.fileUrl,
             });
           }
         } catch {

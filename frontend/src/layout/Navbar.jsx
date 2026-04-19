@@ -9,7 +9,7 @@ import { services } from "../components/hooks/servicesData.js";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext.jsx";
 import { ThemeContext } from "../context/ThemeContext.jsx";
-import { getMyApprovedProfilePhoto, withAccessToken } from "../services/profilePhotoApi.js";
+import { getMyDisplayProfilePhoto, withAccessToken } from "../services/profilePhotoApi.js";
 import NotificationBell from "../components/NotificationBell.jsx";
 
 export default function App() {
@@ -34,7 +34,7 @@ export default function App() {
     const drawerAvatarWidth = Math.round(drawerAvatarSize * 0.8);
     const avatarObjectX = Math.max(0, Math.min(100, Number(user?.avatarObjectX ?? user?.avatar_object_x ?? 50) || 50));
     const avatarObjectY = Math.max(0, Math.min(100, Number(user?.avatarObjectY ?? user?.avatar_object_y ?? 50) || 50));
-    const effectiveProfilePhotoUrl = user?.profilePhotoUrl || profilePhotoUrl || "";
+    const effectiveProfilePhotoUrl = profilePhotoUrl || user?.profilePhotoUrl || "";
 
     useEffect(() => {
         if (!user?.username) return;
@@ -57,7 +57,7 @@ export default function App() {
     useEffect(() => {
         const loadProfilePhoto = async () => {
             try {
-                const row = await getMyApprovedProfilePhoto();
+                const row = await getMyDisplayProfilePhoto();
                 if (!row?.fileUrl) {
                     setProfilePhotoUrl("");
                     return;

@@ -77,6 +77,13 @@ export const getMyApprovedProfilePhoto = async () => {
   return data ? normalizePhoto(data) : null;
 };
 
+export const getMyDisplayProfilePhoto = async () => {
+  const approved = await getMyApprovedProfilePhoto().catch(() => null);
+  if (approved?.fileUrl) return approved;
+  const latest = await getMyProfilePhoto().catch(() => null);
+  return latest?.fileUrl ? latest : null;
+};
+
 export const listPendingProfilePhotos = async () => {
   const data = await apiFetch("/api/users/profile-photos/pending");
   return Array.isArray(data) ? data.map(normalizePhoto) : [];

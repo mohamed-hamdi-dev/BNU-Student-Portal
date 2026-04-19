@@ -2,7 +2,7 @@
 import { Camera, Move, Search, Upload, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AuthContext } from "../../context/AuthContext";
-import { getMyApprovedProfilePhoto, uploadMyProfilePhoto } from "../../services/profilePhotoApi";
+import { getMyDisplayProfilePhoto, uploadMyProfilePhoto } from "../../services/profilePhotoApi";
 import { apiFetch } from "../../services/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
@@ -90,7 +90,7 @@ export default function AdminPasswordPage() {
         let active = true;
         const loadPhoto = async () => {
             try {
-                const row = await getMyApprovedProfilePhoto();
+                const row = await getMyDisplayProfilePhoto();
                 if (!active) return;
                 setAvatarLoadFailed(false);
                 setAvatarUrl(withToken(row?.fileUrl || ""));

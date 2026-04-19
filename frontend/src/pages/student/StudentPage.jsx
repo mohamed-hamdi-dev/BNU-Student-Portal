@@ -5,7 +5,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { useTranslation } from "react-i18next";
 import Swal from "sweetalert2";
 import { apiFetch } from "../../services/api";
-import { getMyApprovedProfilePhoto, withAccessToken } from "../../services/profilePhotoApi";
+import { getMyDisplayProfilePhoto, withAccessToken } from "../../services/profilePhotoApi";
 import { ThemeContext } from "../../context/ThemeContext";
 
 const isArabicLanguage = (lang) => String(lang || "ar").toLowerCase().startsWith("ar");
@@ -627,7 +627,7 @@ export default function Dashboard() {
                 }
                 let profilePhoto = null;
                 try {
-                    profilePhoto = await getMyApprovedProfilePhoto();
+                    profilePhoto = await getMyDisplayProfilePhoto();
                 } catch {
                     profilePhoto = null;
                 }
