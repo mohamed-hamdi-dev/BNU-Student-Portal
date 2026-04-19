@@ -32,11 +32,26 @@ export const toAbsoluteFileUrl = (value = "") => {
   return `${base}${normalizedPath}`;
 };
 
+const stripTokenParam = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    parsed.searchParams.delete("token");
+    const next = parsed.toString();
+    if (/^https?:\/\//i.test(raw)) return next;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return raw
+      .replace(/([?&])token=[^&#]*(&)?/gi, (_, prefix, suffix) => (prefix === "?" && suffix ? "?" : prefix === "&" && suffix ? "&" : ""))
+      .replace(/[?&]$/, "");
+  }
+};
+
 export const withAccessToken = (value = "", token = "") => {
-  const absoluteUrl = toAbsoluteFileUrl(value);
+  const absoluteUrl = toAbsoluteFileUrl(stripTokenParam(value));
   const rawToken = String(token || "").trim();
   if (!absoluteUrl || !rawToken) return absoluteUrl;
-  if (absoluteUrl.includes("token=")) return absoluteUrl;
   const join = absoluteUrl.includes("?") ? "&" : "?";
   return `${absoluteUrl}${join}token=${encodeURIComponent(rawToken)}`;
 };

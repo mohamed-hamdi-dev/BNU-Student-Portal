@@ -20,10 +20,20 @@ const CHAT_CACHE_KEYS = [
 const withToken = (url, token) => {
   const raw = String(url || "").trim();
   if (!raw) return "";
+  let baseUrl = raw;
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    parsed.searchParams.delete("token");
+    baseUrl = /^https?:\/\//i.test(raw) ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    baseUrl = raw
+      .replace(/([?&])token=[^&#]*(&)?/gi, (_, prefix, suffix) => (prefix === "?" && suffix ? "?" : prefix === "&" && suffix ? "&" : ""))
+      .replace(/[?&]$/, "");
+  }
   const t = String(token || "").trim();
-  if (!t || raw.includes("token=")) return raw;
-  const join = raw.includes("?") ? "&" : "?";
-  return `${raw}${join}token=${encodeURIComponent(t)}`;
+  if (!t) return baseUrl;
+  const join = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${join}token=${encodeURIComponent(t)}`;
 };
 
 const normalizeApiBase = (rawValue) => {
