@@ -1855,9 +1855,9 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
   const isSelected = Boolean(options.selected);
   const isUser = category === "user" || Boolean(options.user);
   const markerCode = isUser ? "" : String(options.code || "").trim().toUpperCase();
-  const markerLabel = isUser ? "" : shortMarkerLabel(options.label || "");
-  const markerWidth = markerLabel ? 120 : 40;
-  const markerHeight = markerLabel || markerCode ? 82 : 50;
+  const markerInfo = markerCode;
+  const markerWidth = markerInfo ? 56 : 40;
+  const markerHeight = markerInfo ? 74 : 50;
 
   return L.divIcon({
     className: "campus-marker-wrapper campus-marker",
@@ -1874,28 +1874,6 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
           justify-content: center;
         "
       >
-        ${
-          markerCode
-            ? `
-          <span
-            class="campus-marker-code"
-            style="
-              margin-bottom: 4px;
-              padding: 2px 8px;
-              border-radius: 999px;
-              background: rgba(255,255,255,0.96);
-              color: ${style.to};
-              border: 1px solid rgba(148, 163, 184, 0.28);
-              box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
-              font-size: 10px;
-              line-height: 1.2;
-              font-weight: 900;
-              letter-spacing: .04em;
-            "
-          >${escapeMarkerHtml(markerCode)}</span>
-        `
-            : ""
-        }
         <div
           style="
             position: relative;
@@ -1958,14 +1936,14 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
         ></span>
         </div>
         ${
-          markerLabel
+          markerInfo
             ? `
           <div
             class="campus-marker-label"
             style="
-              margin-top: 6px;
+              margin-top: 5px;
               max-width: 120px;
-              padding: 3px 8px;
+              padding: 4px 8px;
               border-radius: 999px;
               background: rgba(255,255,255,0.96);
               border: 1px solid rgba(148, 163, 184, 0.24);
@@ -1975,18 +1953,23 @@ const createCampusMarkerIcon = (category = "service", options = {}) => {
               line-height: 1.25;
               font-weight: 800;
               text-align: center;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
             "
-          >${escapeMarkerHtml(markerLabel)}</div>
+          >
+            ${markerCode ? `<span style="font-size: 9px; font-weight: 900; color: ${style.to}; letter-spacing: .04em;">${escapeMarkerHtml(markerCode)}</span>` : ""}
+          </div>
         `
             : ""
         }
       </div>
     `,
     iconSize: [markerWidth, markerHeight],
-    iconAnchor: [markerWidth / 2, markerCode || markerLabel ? 54 : 40],
+    iconAnchor: [markerWidth / 2, markerInfo ? 54 : 40],
     popupAnchor: [0, -28],
   });
 };
