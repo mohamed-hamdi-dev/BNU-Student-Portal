@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
 from core.deps import get_current_user, get_db, require_role
@@ -69,6 +69,14 @@ def _default_state() -> AcademicState:
 
 
 def _get_or_create_state(db: Session) -> AcademicState:
+    inspector = inspect(db.bind)
+    try:
+        column_names = {column.get("name") for column in inspector.get_columns("academic_state")}
+    except Exception:
+        column_names = set()
+    if "grade_publish_map_json" not in column_names:
+        db.execute(text("ALTER TABLE academic_state ADD COLUMN grade_publish_map_json TEXT NOT NULL DEFAULT '{}'"))
+        db.commit()
     state = db.query(AcademicState).filter(AcademicState.id == 1).first()
     if not state:
         state = _default_state()
@@ -740,6 +748,7 @@ def _serialize_state(state: AcademicState) -> AcademicStateResponse:
             state.registration_settings_json,
             {"activeAcademicYear": "1", "enforcePrerequisites": True, "enforceMaxHours": True},
         ),
+        gradePublishMap=_decode_json(getattr(state, "grade_publish_map_json", "{}"), {}),
         studentRegistrations=_decode_json(state.student_registrations_json, []),
         academicRecords=_decode_json(state.academic_records_json, []),
         updatedAt=state.updated_at or datetime.now(timezone.utc),
@@ -856,10 +865,12 @@ async def put_academic_state(
     )
     if is_admin:
         next_registration_settings = payload.registrationSettings if isinstance(payload.registrationSettings, dict) else {}
+        next_grade_publish_map = payload.gradePublishMap if isinstance(payload.gradePublishMap, dict) else {}
         state.courses_json = json.dumps(payload.courses, ensure_ascii=False)
         state.years_json = json.dumps(payload.years, ensure_ascii=False)
         state.open_semesters_json = json.dumps(payload.openSemesters, ensure_ascii=False)
         state.registration_settings_json = json.dumps(next_registration_settings, ensure_ascii=False)
+        state.grade_publish_map_json = json.dumps(next_grade_publish_map, ensure_ascii=False)
         state.student_registrations_json = json.dumps(payload.studentRegistrations, ensure_ascii=False)
         state.academic_records_json = json.dumps(payload.academicRecords, ensure_ascii=False)
         active_year = _resolve_sync_academic_year_label(db, next_registration_settings)
@@ -884,6 +895,7 @@ async def put_academic_state(
         existing_courses = _decode_json(state.courses_json, [])
         existing_years = _decode_json(state.years_json, [])
         existing_open_semesters = _decode_json(state.open_semesters_json, {"autumn": True, "spring": False, "summer": False})
+        existing_grade_publish_map = _decode_json(getattr(state, "grade_publish_map_json", "{}"), {})
         existing_regs = _decode_json(state.student_registrations_json, [])
         existing_records = _decode_json(state.academic_records_json, [])
         incoming_regs = payload.studentRegistrations if isinstance(payload.studentRegistrations, list) else []
@@ -947,6 +959,7 @@ async def put_academic_state(
         state.years_json = json.dumps(existing_years, ensure_ascii=False)
         state.open_semesters_json = json.dumps(existing_open_semesters, ensure_ascii=False)
         state.registration_settings_json = json.dumps(existing_registration_settings, ensure_ascii=False)
+        state.grade_publish_map_json = json.dumps(existing_grade_publish_map if isinstance(existing_grade_publish_map, dict) else {}, ensure_ascii=False)
         state.student_registrations_json = json.dumps(next_regs, ensure_ascii=False)
         state.academic_records_json = json.dumps(next_records, ensure_ascii=False)
         logger.info(

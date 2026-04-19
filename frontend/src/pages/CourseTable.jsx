@@ -6,7 +6,6 @@ import { SystemContext } from "../context/SystemContext";
 import { calculateSemesterGpa, normalizeCourse, normalizeSemesterValue } from "../utils/academicData";
 import { listMyAdvisorRequests, getMyStudentProfile } from "../services/advisorRegistrationApi";
 
-const GRADE_PUBLISH_STATUS_KEY = "grades.publish.status.v1";
 const APPROVED_REGISTRATION_STATUSES = new Set(["registered", "approved", "locked", "graded"]);
 const safeParse = (value, fallback) => {
     try {
@@ -114,6 +113,13 @@ const getRecordComponentValue = (record, componentKey) => {
     if (record?.componentScores && typeof record.componentScores === "object") return record.componentScores[key];
     return "";
 };
+const recordHasPublishedFallback = (record = {}, cycleKey = "") => {
+    const cycleValue = getRecordComponentValue(record, cycleKey);
+    if (hasActualValue(cycleValue)) return true;
+    if (cycleKey === "final" && hasActualValue(record?.grade)) return true;
+    if (hasActualValue(record?.total)) return true;
+    return String(record?.status || "").trim().toLowerCase() === "graded";
+};
 const toArabicComponentLabel = (component = {}) => {
     const key = String(component?.key || "").trim();
     if (key === "mid1") return "ميد1";
@@ -155,7 +161,7 @@ const SemesterTable = ({ records, publishMap }) => {
     const isCyclePublished = (record, cycle) => {
         const key = selectionKey(record.academicYear, record.semester, cycle);
         const status = publishMap?.[key];
-        if (!status) return record.status === "graded";
+        if (!status) return recordHasPublishedFallback(record, cycle);
         return status === "Published";
     };
 
@@ -401,8 +407,7 @@ const AccordionItem = ({ item, isOpen, onToggle, publishMap }) => {
 export default function CourseTablePage() {
     const { t } = useTranslation("global");
     const navigate = useNavigate();
-    const { academicRecords, semesterNames, courses: systemCourses, studentRegistrations = [] } = useContext(SystemContext);
-    const [publishMap] = useState(() => safeParse(localStorage.getItem(GRADE_PUBLISH_STATUS_KEY) || "{}", {}));
+    const { academicRecords, semesterNames, courses: systemCourses, studentRegistrations = [], gradePublishMap: publishMap = {} } = useContext(SystemContext);
     const [approvedTermsFromRequests, setApprovedTermsFromRequests] = useState(() => new Set());
     const [profileStats, setProfileStats] = useState({ gpa: 0, hours: 0 });
     const [hasServerProfile, setHasServerProfile] = useState(false);
@@ -644,8 +649,6 @@ export default function CourseTablePage() {
         </div>
     );
 }
-
-
 
 
 

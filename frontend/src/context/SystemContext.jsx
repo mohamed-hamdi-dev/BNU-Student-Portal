@@ -11,6 +11,7 @@ const ACTIVE_OPEN_SEMESTER_KEY = "system.activeOpenSemester";
 const REGISTRATION_SETTINGS_KEY = "system.registrationSettings";
 const STUDENT_REGISTRATIONS_KEY = "system.studentRegistrations";
 const ACADEMIC_RECORDS_KEY = "system.academicRecords";
+const GRADE_PUBLISH_STATUS_KEY = "grades.publish.status.v1";
 const LEGACY_SELECTED_COURSES_KEY = "selectedCourses";
 const LEGACY_GRADES_KEY = "admin.gradesData";
 
@@ -498,6 +499,10 @@ export default function SystemContextProvider({ children }) {
         const stored = safeParse(ACADEMIC_RECORDS_KEY, safeParse(LEGACY_GRADES_KEY, []));
         return Array.isArray(stored) ? stored.map((item) => normalizeAcademicRecord(item)) : [];
     });
+    const [gradePublishMap, setGradePublishMapState] = useState(() => {
+        const stored = safeParse(GRADE_PUBLISH_STATUS_KEY, {});
+        return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+    });
 
     const openSemester = useMemo(() => {
         const preferred = String(localStorage.getItem(ACTIVE_OPEN_SEMESTER_KEY) || "").trim();
@@ -521,6 +526,10 @@ export default function SystemContextProvider({ children }) {
     const persistAcademicRecords = (nextRecords) => {
         localStorage.setItem(ACADEMIC_RECORDS_KEY, JSON.stringify(nextRecords));
         localStorage.setItem(LEGACY_GRADES_KEY, JSON.stringify(nextRecords));
+    };
+
+    const persistGradePublishMap = (nextMap) => {
+        localStorage.setItem(GRADE_PUBLISH_STATUS_KEY, JSON.stringify(nextMap && typeof nextMap === "object" ? nextMap : {}));
     };
 
     const setOpenSemester = (semesterId) => {
@@ -615,6 +624,14 @@ export default function SystemContextProvider({ children }) {
             return normalized;
         });
     };
+    const setGradePublishMap = (nextMap) => {
+        setGradePublishMapState((prev) => {
+            const resolved = typeof nextMap === "function" ? nextMap(prev) : nextMap;
+            const normalized = resolved && typeof resolved === "object" && !Array.isArray(resolved) ? resolved : {};
+            persistGradePublishMap(normalized);
+            return normalized;
+        });
+    };
     const saveRegistrationSettingsNow = useCallback(
         async (nextSettings) => {
             let mergedSettings = null;
@@ -636,6 +653,7 @@ export default function SystemContextProvider({ children }) {
                     years,
                     openSemesters,
                     registrationSettings: mergedSettings || registrationSettings,
+                    gradePublishMap,
                     studentRegistrations: isAdminUser ? studentRegistrations : [],
                     academicRecords,
                 };
@@ -645,7 +663,7 @@ export default function SystemContextProvider({ children }) {
                 return { ok: false, message: "فشل الحفظ على الخادم. تحقّق من الاتصال ثم أعد المحاولة." };
             }
         },
-        [courses, years, openSemesters, registrationSettings, studentRegistrations, academicRecords]
+        [courses, years, openSemesters, registrationSettings, gradePublishMap, studentRegistrations, academicRecords]
     );
     const getPassedCourseCodesForStudent = (studentId) => {
         const sid = normalizeStudentIdKey(studentId);
@@ -1080,13 +1098,15 @@ export default function SystemContextProvider({ children }) {
             removeStudentRegistration,
             academicRecords,
             setAcademicRecords,
+            gradePublishMap,
+            setGradePublishMap,
             upsertPreliminaryAcademicRecord,
             removePreliminaryAcademicRecord,
             mergeGradeRecords,
             updateAcademicRecord,
             semesterNames,
         }),
-        [registrationOpen, openSemester, courses, years, openSemesters, registrationSettings, saveRegistrationSettingsNow, activeAcademicYear, studentRegistrations, academicRecords]
+        [registrationOpen, openSemester, courses, years, openSemesters, registrationSettings, saveRegistrationSettingsNow, activeAcademicYear, studentRegistrations, academicRecords, gradePublishMap]
     );
 
     useEffect(() => {
@@ -1107,6 +1127,8 @@ export default function SystemContextProvider({ children }) {
                 const nextOpenSemesters = state.openSemesters && typeof state.openSemesters === "object" ? state.openSemesters : defaultOpenSemesters;
                 const nextRegistrationSettings =
                     state.registrationSettings && typeof state.registrationSettings === "object" ? state.registrationSettings : defaultRegistrationSettings;
+                const nextGradePublishMap =
+                    state.gradePublishMap && typeof state.gradePublishMap === "object" && !Array.isArray(state.gradePublishMap) ? state.gradePublishMap : {};
                 const isAdminUser = getLoggedUserRole() === "admin";
                 const nextRegistrations = isAdminUser ? dedupeRegistrations(state.studentRegistrations) : [];
                 const nextRecords = Array.isArray(state.academicRecords) ? state.academicRecords.map((item) => normalizeAcademicRecord(item)) : [];
@@ -1123,11 +1145,13 @@ export default function SystemContextProvider({ children }) {
                 setRegistrationSettingsState((prev) => ({ ...prev, ...nextRegistrationSettings }));
                 setStudentRegistrationsState(nextRegistrations);
                 setAcademicRecordsState(nextRecords);
+                setGradePublishMapState(nextGradePublishMap);
                 lastAutosaveHashRef.current = stableHash({
                     courses: nextCourses,
                     years: nextYears,
                     openSemesters: nextOpenSemesters,
                     registrationSettings: { ...defaultRegistrationSettings, ...nextRegistrationSettings },
+                    gradePublishMap: nextGradePublishMap,
                     studentRegistrations: nextRegistrations,
                     academicRecords: nextRecords,
                 });
@@ -1145,6 +1169,7 @@ export default function SystemContextProvider({ children }) {
                 localStorage.setItem(REGISTRATION_SETTINGS_KEY, JSON.stringify({ ...defaultRegistrationSettings, ...nextRegistrationSettings }));
                 persistRegistrations(nextRegistrations);
                 persistAcademicRecords(nextRecords);
+                persistGradePublishMap(nextGradePublishMap);
             } catch {
                 // Keep local state as fallback if backend state is unavailable.
             } finally {
@@ -1166,6 +1191,7 @@ export default function SystemContextProvider({ children }) {
             years,
             openSemesters,
             registrationSettings,
+            gradePublishMap,
             studentRegistrations: isAdminUser ? studentRegistrations : [],
             academicRecords,
         };
@@ -1189,7 +1215,7 @@ export default function SystemContextProvider({ children }) {
                 autosaveTimerRef.current = null;
             }
         };
-    }, [courses, years, openSemesters, registrationSettings, studentRegistrations, academicRecords, isServerHydrated, stableHash]);
+    }, [courses, years, openSemesters, registrationSettings, gradePublishMap, studentRegistrations, academicRecords, isServerHydrated, stableHash]);
 
     return <SystemContext.Provider value={value}>{children}</SystemContext.Provider>;
 }

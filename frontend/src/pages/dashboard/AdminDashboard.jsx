@@ -7,7 +7,6 @@ import autoTable from "jspdf-autotable";
 import { getCurrentAcademicYear, normalizeAcademicYearValue, normalizeSemesterValue } from "../../utils/academicData";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
-const GRADE_PUBLISH_STATUS_KEY = "grades.publish.status.v1";
 const GRADE_AUDIT_LOG_KEY = "grades.audit.log.v1";
 const GRADE_SNAPSHOTS_KEY = "grades.snapshots.v1";
 const MAX_SNAPSHOTS = 20;
@@ -446,7 +445,7 @@ const calculateGpa = (courses) => {
 };
 
 export default function AdminDashboard() {
-    const { academicRecords, mergeGradeRecords, updateAcademicRecord, setAcademicRecords, courses, openSemesters, semesterNames, registrationSettings } = useContext(SystemContext);
+    const { academicRecords, mergeGradeRecords, updateAcademicRecord, setAcademicRecords, courses, openSemesters, semesterNames, registrationSettings, gradePublishMap: publishMap, setGradePublishMap: setPublishMap } = useContext(SystemContext);
     const { t } = useTranslation("admin");
     const [allData, setAllData] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
@@ -460,7 +459,6 @@ export default function AdminDashboard() {
     const [usersLoaded, setUsersLoaded] = useState(false);
     const [usersLoadFailed, setUsersLoadFailed] = useState(false);
     const [pendingImport, setPendingImport] = useState(null);
-    const [publishMap, setPublishMap] = useState(() => parseSafe(localStorage.getItem(GRADE_PUBLISH_STATUS_KEY) || "{}", {}));
     const [auditLog, setAuditLog] = useState(() => parseSafe(localStorage.getItem(GRADE_AUDIT_LOG_KEY) || "[]", []));
     const [snapshots, setSnapshots] = useState(() => parseSafe(localStorage.getItem(GRADE_SNAPSHOTS_KEY) || "[]", []));
 
@@ -504,10 +502,6 @@ export default function AdminDashboard() {
         const timer = setTimeout(() => setUploadStatus(null), 4500);
         return () => clearTimeout(timer);
     }, [uploadStatus]);
-
-    useEffect(() => {
-        localStorage.setItem(GRADE_PUBLISH_STATUS_KEY, JSON.stringify(publishMap));
-    }, [publishMap]);
 
     useEffect(() => {
         localStorage.setItem(GRADE_AUDIT_LOG_KEY, JSON.stringify(auditLog));

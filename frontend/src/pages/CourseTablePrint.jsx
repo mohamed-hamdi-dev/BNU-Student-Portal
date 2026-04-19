@@ -98,7 +98,16 @@ const getRecordComponentValue = (record, componentKey) => {
     return "";
 };
 
-const getStatusLabel = (status) => (status === "graded" ? "مكتمل" : "قيد الانتظار");
+const hasPrintableGradeState = (record = {}, rowComponents = []) => {
+    if (String(record?.status || "").trim().toLowerCase() === "graded") return true;
+    if (String(record?.grade || "").trim()) return true;
+    return rowComponents.some((component) => {
+        const value = getRecordComponentValue(record, component.key);
+        return value !== undefined && value !== null && String(value).trim() !== "";
+    });
+};
+
+const getStatusLabel = (record, rowComponents = []) => (hasPrintableGradeState(record, rowComponents) ? "مكتمل" : "قيد الانتظار");
 
 export default function CourseTablePrint() {
     const navigate = useNavigate();
@@ -371,8 +380,8 @@ export default function CourseTablePrint() {
                                                                 );
                                                             })}
                                                             <td className="border border-slate-200 p-2.5 text-center text-base font-black text-[#00acd5]">{hasAnyScore ? displayValue(total) : "-"}</td>
-                                                            <td className="border border-slate-200 p-2.5 text-center font-black text-lg">{record.status === "graded" ? displayValue(record.grade) : "-"}</td>
-                                                            <td className="border border-slate-200 p-2.5 text-center text-sm font-bold text-slate-700">{getStatusLabel(record.status)}</td>
+                                                            <td className="border border-slate-200 p-2.5 text-center font-black text-lg">{hasPrintableGradeState(record, rowComponents) ? displayValue(record.grade) : "-"}</td>
+                                                            <td className="border border-slate-200 p-2.5 text-center text-sm font-bold text-slate-700">{getStatusLabel(record, rowComponents)}</td>
                                                         </tr>
                                                     );
                                                 })}

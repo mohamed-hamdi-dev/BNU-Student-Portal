@@ -9,6 +9,7 @@ class AcademicStatePayload(BaseModel):
     years: list[dict[str, Any]] = []
     openSemesters: dict[str, bool] = {"autumn": True, "spring": False, "summer": False}
     registrationSettings: dict[str, Any] = {"activeAcademicYear": "1", "enforcePrerequisites": True, "enforceMaxHours": True}
+    gradePublishMap: dict[str, str] = {}
     studentRegistrations: list[dict[str, Any]] = []
     academicRecords: list[dict[str, Any]] = []
 
