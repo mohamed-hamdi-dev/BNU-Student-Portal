@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Swal from "sweetalert2";
 import { apiFetch } from "../services/api";
 import { normalizeAcademicYearValue } from "../utils/academicData";
 import { getMyTrackSelectionStatus } from "../services/trackSelectionApi";
@@ -264,7 +265,22 @@ export default function AuthContextProvider({ children }) {
     const sessionNotice = String(localStorage.getItem(SESSION_NOTICE_KEY) || "").trim();
     if (sessionNotice) {
       localStorage.removeItem(SESSION_NOTICE_KEY);
-      window.setTimeout(() => window.alert(sessionNotice), 50);
+      window.setTimeout(() => {
+        Swal.fire({
+          icon: "info",
+          title: "انتهت الجلسة",
+          text: sessionNotice,
+          confirmButtonText: "تسجيل الدخول",
+          confirmButtonColor: "#05ADCF",
+          background: "#0f172a",
+          color: "#e5eef5",
+          backdrop: "rgba(2, 6, 23, 0.72)",
+          customClass: {
+            popup: "rounded-[1.5rem]",
+            confirmButton: "rounded-xl px-5 py-2 font-bold",
+          },
+        });
+      }, 50);
     }
   }, []);
 
