@@ -1125,6 +1125,90 @@ def _validate_offering_for_student(db: Session, offering: CourseOffering, profil
         raise HTTPException(status_code=400, detail=f"Course {course.code} is track-specific before branching year")
 
 
+def _selected_offering_ids_for_student_term(
+    db: Session,
+    *,
+    student_user_id: int,
+    academic_year_label: str,
+    semester: str,
+) -> set[int]:
+    rows = (
+        db.query(RegistrationCourseSelection.offering_id)
+        .join(RegistrationRequest, RegistrationRequest.id == RegistrationCourseSelection.registration_request_id)
+        .filter(
+            RegistrationCourseSelection.student_user_id == int(student_user_id),
+            RegistrationRequest.academic_year_label == str(academic_year_label),
+            RegistrationRequest.semester == str(semester),
+            RegistrationRequest.status.in_(SEAT_OCCUPYING_REQUEST_STATUSES),
+        )
+        .all()
+    )
+    return {int(row[0]) for row in rows if row and row[0] is not None}
+
+
+def _offering_eligibility_for_student(
+    db: Session,
+    *,
+    offering: CourseOffering,
+    course: CourseCatalog | None,
+    profile: StudentAcademicProfile,
+    passed_course_ids: set[int],
+    grades_by_course: dict[int, str],
+    selected_offering_ids: set[int],
+    seat_snapshot: dict[str, Any] | None,
+) -> tuple[str, str | None]:
+    if not course:
+        return "hidden_invalid", "المادة غير صالحة أو غير مرتبطة بعرض صحيح."
+
+    if int(offering.id or 0) in selected_offering_ids:
+        return "selected", None
+
+    if course.college_id and profile.college_id and course.college_id != profile.college_id:
+        return "locked_college", "هذه المادة تتبع كلية أخرى."
+
+    if course.id is not None and int(course.id) in passed_course_ids:
+        return "locked_passed", "تم اجتياز هذه المادة مسبقًا."
+
+    if (
+        course.study_year is not None
+        and profile.current_study_year is not None
+        and int(course.study_year) > int(profile.current_study_year)
+    ):
+        return "locked_future_year", f"متاحة بعد الوصول إلى السنة {int(course.study_year)}."
+
+    college = db.query(College).filter(College.id == profile.college_id).first() if profile.college_id else None
+    if college and college.branching_start_year:
+        if profile.current_study_year >= college.branching_start_year:
+            if course.track_id and profile.current_track_id and course.track_id != profile.current_track_id:
+                return "locked_track", "هذه المادة خاصة بمسار آخر."
+        elif course.track_id:
+            return "locked_track_before_branching", "هذه المادة مرتبطة بمسار تخصص وتتاح بعد سنة التشعيب."
+
+    try:
+        _validate_prerequisites_for_course(
+            db=db,
+            course=course,
+            passed_course_ids=passed_course_ids,
+            grades_by_course=grades_by_course,
+            selected_course_ids=set(),
+        )
+    except HTTPException as exc:
+        detail = getattr(exc, "detail", None)
+        return "locked_prerequisite", str(detail or "متطلب سابق غير مستوفى.")
+
+    if not (
+        str(getattr(offering, "day_of_week", "") or "").strip()
+        and str(getattr(offering, "start_time", "") or "").strip()
+        and str(getattr(offering, "end_time", "") or "").strip()
+    ):
+        return "locked_schedule", "جدول هذه الشعبة غير مكتمل حاليًا."
+
+    if seat_snapshot and not bool(seat_snapshot.get("is_open", True)):
+        return "locked_full", "هذه الشعبة مغلقة أو ممتلئة."
+
+    return "open", None
+
+
 def _normalize_section_match_token(value: Any) -> str:
     return (
         str(value or "")
@@ -2508,30 +2592,35 @@ async def my_available_offerings(academic_year_label: str, semester: str, db: Se
     profile = _get_student_profile(db, current_user.id)
     offerings = db.query(CourseOffering).filter(CourseOffering.academic_year_label == academic_year_label, CourseOffering.semester == semester, CourseOffering.is_active == True).all()  # noqa: E712
     capacity_snapshot = _section_capacity_snapshot(db, [int(item.id) for item in offerings])
+    passed_course_ids, grades_by_course = _build_passed_course_sets(db, current_user.id)
+    selected_offering_ids = _selected_offering_ids_for_student_term(
+        db,
+        student_user_id=current_user.id,
+        academic_year_label=academic_year_label,
+        semester=semester,
+    )
     items: list[dict[str, Any]] = []
     excluded_incomplete_schedule = 0
     for offering in offerings:
-        try:
-            _validate_offering_for_student(db, offering, profile)
-        except HTTPException as exc:
-            # Do not fail the whole endpoint because one offering is invalid
-            # for this specific student (year/track/college mismatch).
-            if int(getattr(exc, "status_code", 0) or 0) == 400:
-                continue
-            raise
-        has_complete_schedule = bool(
-            str(getattr(offering, "day_of_week", "") or "").strip()
-            and str(getattr(offering, "start_time", "") or "").strip()
-            and str(getattr(offering, "end_time", "") or "").strip()
+        seat = capacity_snapshot.get(int(offering.id), {})
+        course = db.query(CourseCatalog).filter(CourseCatalog.id == offering.course_id).first()
+        eligibility_status, eligibility_reason = _offering_eligibility_for_student(
+            db,
+            offering=offering,
+            course=course,
+            profile=profile,
+            passed_course_ids=passed_course_ids,
+            grades_by_course=grades_by_course,
+            selected_offering_ids=selected_offering_ids,
+            seat_snapshot=seat,
         )
-        if not has_complete_schedule:
+        if eligibility_status == "hidden_invalid":
+            continue
+        if eligibility_status == "locked_schedule":
             excluded_incomplete_schedule += 1
             continue
-        seat = capacity_snapshot.get(int(offering.id), {})
-        if seat and not bool(seat.get("is_open", True)):
-            # Students should not see closed sections as available choices.
+        if eligibility_status not in {"open", "selected"}:
             continue
-        course = db.query(CourseCatalog).filter(CourseCatalog.id == offering.course_id).first()
         items.append(
             {
                 "offering_id": offering.id,
@@ -2540,11 +2629,15 @@ async def my_available_offerings(academic_year_label: str, semester: str, db: Se
                 "course_code": course.code if course else None,
                 "course_title_ar": course.title_ar if course else None,
                 "credit_hours": course.credit_hours if course else 0,
+                "study_year": course.study_year if course else None,
                 "current_students": seat.get("current_students", 0),
                 "capacity": seat.get("capacity"),
                 "available_seats": seat.get("available_seats"),
                 "is_open": bool(seat.get("is_open", True)),
                 "section_status": seat.get("section_status", "OPEN"),
+                "eligibility_status": eligibility_status,
+                "eligibility_reason": eligibility_reason,
+                "is_selected": int(offering.id) in selected_offering_ids,
                 "day_of_week": offering.day_of_week,
                 "start_time": offering.start_time,
                 "end_time": offering.end_time,
@@ -2599,27 +2692,35 @@ async def offerings_for_student(
         .all()
     )
     capacity_snapshot = _section_capacity_snapshot(db, [int(item.id) for item in offerings])
+    passed_course_ids, grades_by_course = _build_passed_course_sets(db, student_user_id)
+    selected_offering_ids = _selected_offering_ids_for_student_term(
+        db,
+        student_user_id=student_user_id,
+        academic_year_label=academic_year_label,
+        semester=semester,
+    )
     items: list[dict[str, Any]] = []
     excluded_incomplete_schedule = 0
     for offering in offerings:
-        try:
-            _validate_offering_for_student(db, offering, profile)
-        except HTTPException as exc:
-            if int(getattr(exc, "status_code", 0) or 0) == 400:
-                continue
-            raise
-        has_complete_schedule = bool(
-            str(getattr(offering, "day_of_week", "") or "").strip()
-            and str(getattr(offering, "start_time", "") or "").strip()
-            and str(getattr(offering, "end_time", "") or "").strip()
+        seat = capacity_snapshot.get(int(offering.id), {})
+        course = db.query(CourseCatalog).filter(CourseCatalog.id == offering.course_id).first()
+        eligibility_status, eligibility_reason = _offering_eligibility_for_student(
+            db,
+            offering=offering,
+            course=course,
+            profile=profile,
+            passed_course_ids=passed_course_ids,
+            grades_by_course=grades_by_course,
+            selected_offering_ids=selected_offering_ids,
+            seat_snapshot=seat,
         )
-        if not has_complete_schedule:
+        if eligibility_status == "hidden_invalid":
+            continue
+        if eligibility_status == "locked_schedule":
             excluded_incomplete_schedule += 1
             continue
-        seat = capacity_snapshot.get(int(offering.id), {})
-        if open_only and seat and not bool(seat.get("is_open", True)):
+        if open_only and eligibility_status not in {"open", "selected"}:
             continue
-        course = db.query(CourseCatalog).filter(CourseCatalog.id == offering.course_id).first()
         items.append(
             {
                 "offering_id": offering.id,
@@ -2628,11 +2729,15 @@ async def offerings_for_student(
                 "course_code": course.code if course else None,
                 "course_title_ar": course.title_ar if course else None,
                 "credit_hours": course.credit_hours if course else 0,
+                "study_year": course.study_year if course else None,
                 "current_students": seat.get("current_students", 0),
                 "capacity": seat.get("capacity"),
                 "available_seats": seat.get("available_seats"),
                 "is_open": bool(seat.get("is_open", True)),
                 "section_status": seat.get("section_status", "OPEN"),
+                "eligibility_status": eligibility_status,
+                "eligibility_reason": eligibility_reason,
+                "is_selected": int(offering.id) in selected_offering_ids,
                 "day_of_week": offering.day_of_week,
                 "start_time": offering.start_time,
                 "end_time": offering.end_time,

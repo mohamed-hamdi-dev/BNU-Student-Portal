@@ -84,6 +84,18 @@ const reqHeaderLabel = (status) => {
   return "مسجل";
 };
 
+const offeringStatusMeta = (offering, isSelected) => {
+  const status = String(offering?.eligibility_status || "").trim().toLowerCase();
+  if (isSelected || status === "selected") return { label: "مسجلة حاليًا", color: "#047857", bg: "rgba(16,185,129,0.12)" };
+  if (status === "open") return { label: "متاحة للتسجيل", color: "#0369a1", bg: "rgba(14,165,233,0.12)" };
+  if (status === "locked_prerequisite") return { label: "متطلب سابق", color: "#b45309", bg: "rgba(245,158,11,0.14)" };
+  if (status === "locked_future_year") return { label: "سنة أعلى", color: "#7c3aed", bg: "rgba(124,58,237,0.12)" };
+  if (status === "locked_passed") return { label: "تم اجتيازها", color: "#475569", bg: "rgba(148,163,184,0.14)" };
+  if (status === "locked_full") return { label: "الشعبة مغلقة", color: "#b91c1c", bg: "rgba(239,68,68,0.12)" };
+  if (status === "locked_track" || status === "locked_track_before_branching") return { label: "غير متاحة للمسار", color: "#6d28d9", bg: "rgba(139,92,246,0.12)" };
+  return { label: "غير متاحة", color: "#9a3412", bg: "rgba(249,115,22,0.12)" };
+};
+
 const normalizePeriodStatus = (value) => {
   const s = String(value || "").trim().toUpperCase();
   return Object.prototype.hasOwnProperty.call(PERIOD_LABELS, s) ? s : "CLOSED";
@@ -410,7 +422,7 @@ export default function AdvisorRegistrationRequestsPage() {
         const canLoadAllOfferings = ["OPEN", "PENDING_REVIEW"].includes(normalizePeriodStatus(periodRes?.status));
         if (canLoadAllOfferings) {
           try {
-            const fullRes = await listOfferingsForStudent(studentId, ayLabel, semester, { openOnly: true });
+            const fullRes = await listOfferingsForStudent(studentId, ayLabel, semester, { openOnly: false });
             const fullItems = Array.isArray(fullRes?.items) ? fullRes.items : [];
             if (fullItems.length) {
               const mapById = new Map(
@@ -437,7 +449,11 @@ export default function AdvisorRegistrationRequestsPage() {
                 }
               });
               setOfferings(Array.from(mapById.values()));
-              setSelectedOfferings(selectedIds);
+              const selectedFromItems = fullItems
+                .filter((item) => item?.is_selected)
+                .map((item) => Number(item?.offering_id))
+                .filter((id) => Number.isFinite(id) && id > 0);
+              setSelectedOfferings(selectedIds.length ? selectedIds : selectedFromItems);
               return;
             }
           } catch {
@@ -611,7 +627,15 @@ export default function AdvisorRegistrationRequestsPage() {
       const res = await listOfferingsForStudent(sid, form.academic_year_label, form.semester, { openOnly: false });
       const items = Array.isArray(res?.items) ? res.items : [];
       setOfferings(items);
-      if (!existingReq) setSelectedOfferings([]);
+      const selectedFromItems = items
+        .filter((item) => item?.is_selected)
+        .map((item) => Number(item?.offering_id))
+        .filter((id) => Number.isFinite(id) && id > 0);
+      if (selectedFromItems.length) {
+        setSelectedOfferings(selectedFromItems);
+      } else if (!existingReq) {
+        setSelectedOfferings([]);
+      }
       if (items.length === 0) showToast("لا توجد مواد متاحة لهذا الطالب في هذا الترم.", "error");
     } catch (e) {
       showToast(toArError(e?.message), "error");
@@ -1103,7 +1127,10 @@ export default function AdvisorRegistrationRequestsPage() {
                       const offeringId = Number(o?.offering_id);
                       const isSelected = selectedOfferings.some((id) => Number(id) === offeringId);
                       const isSectionOpen = o?.is_open !== false;
-                      const isSelectable = isSectionOpen || isSelected;
+                      const eligibilityStatus = String(o?.eligibility_status || "").trim().toLowerCase();
+                      const isSelectable = isSelected || eligibilityStatus === "open";
+                      const statusMeta = offeringStatusMeta(o, isSelected);
+                      const reasonText = !isSelectable ? String(o?.eligibility_reason || "").trim() : "";
                       const alternatives = isSelected ? getAlternativeSections(o) : [];
                       const swapValue = String(sectionSwapDraft[offeringId] || "");
                       return (
@@ -1143,7 +1170,17 @@ export default function AdvisorRegistrationRequestsPage() {
                               <div style={{ fontWeight: 600, fontSize: "0.75rem", color: "var(--ar-text-muted)", marginTop: 2 }}>
                                 السكشن {o.section}
                               </div>
-                              {!isSectionOpen && (
+                              <div style={{ marginTop: 6 }}>
+                                <span style={{ fontWeight: 800, fontSize: "0.72rem", color: statusMeta.color, background: statusMeta.bg, padding: "4px 10px", borderRadius: 999 }}>
+                                  {statusMeta.label}
+                                </span>
+                              </div>
+                              {reasonText && (
+                                <div style={{ fontWeight: 700, fontSize: "0.72rem", color: "#9a3412", marginTop: 4 }}>
+                                  {reasonText}
+                                </div>
+                              )}
+                              {!isSectionOpen && eligibilityStatus === "open" && (
                                 <div style={{ fontWeight: 700, fontSize: "0.72rem", color: "#dc2626", marginTop: 4 }}>
                                   مغلق — هذا السكشن ممتلئ
                                 </div>
