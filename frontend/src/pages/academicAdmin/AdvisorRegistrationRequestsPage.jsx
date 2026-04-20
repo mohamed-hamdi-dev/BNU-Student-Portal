@@ -104,6 +104,44 @@ const toDateSafe = (value) => {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
 };
+const getEffectiveWindowStatus = (windowRow) => {
+  if (!windowRow) return "CLOSED";
+  if (!Boolean(windowRow.is_active)) return "CLOSED";
+  const now = new Date();
+  const openAt = toDateSafe(windowRow.open_at || windowRow.starts_at);
+  const closeAt = toDateSafe(windowRow.close_at || windowRow.ends_at);
+  if (openAt && now < openAt) return "CLOSED";
+  if (closeAt && now > closeAt) return "CLOSED";
+  return normalizePeriodStatus(windowRow.status);
+};
+const termSortWeight = (windowRow) => {
+  const label = String(windowRow?.academic_year_label || "").trim();
+  const semester = String(windowRow?.semester || "").trim().toLowerCase();
+  const yearStart = Number.parseInt(label.split("-")[0], 10);
+  const yearWeight = Number.isFinite(yearStart) ? yearStart : 0;
+  const semesterWeight = { autumn: 3, spring: 2, summer: 1 }.get(semester, 0);
+  return [yearWeight, semesterWeight];
+};
+const pickPreferredWindow = (windows) => {
+  const rows = Array.isArray(windows) ? windows.filter(Boolean) : [];
+  if (!rows.length) return null;
+  const statusWeight = { OPEN: 5, PENDING_REVIEW: 4, APPROVED: 3, LOCKED: 2, CLOSED: 1 };
+  const sorted = [...rows].sort((a, b) => {
+    const statusDiff =
+      (statusWeight[getEffectiveWindowStatus(b)] || 0) - (statusWeight[getEffectiveWindowStatus(a)] || 0);
+    if (statusDiff !== 0) return statusDiff;
+
+    const [yearB, semB] = termSortWeight(b);
+    const [yearA, semA] = termSortWeight(a);
+    if (yearB !== yearA) return yearB - yearA;
+    if (semB !== semA) return semB - semA;
+
+    const updatedB = new Date(b?.updated_at || b?.starts_at || 0).getTime();
+    const updatedA = new Date(a?.updated_at || a?.starts_at || 0).getTime();
+    return updatedB - updatedA;
+  });
+  return sorted[0] || null;
+};
 const getPeriodReason = (periodObj) => {
   const win = periodObj?.window || null;
   if (!win) return "";
@@ -177,6 +215,7 @@ export default function AdvisorRegistrationRequestsPage() {
   const { show: showToast, ToastEl } = useToast();
   const periodRequestSeqRef = useRef(0);
   const studentSyncSeqRef = useRef(0);
+  const initializedPreferredWindowRef = useRef(false);
 
   /* ---- Tab ---- */
   const [activeTab, setActiveTab] = useState("register"); // register | requests
@@ -359,6 +398,15 @@ export default function AdvisorRegistrationRequestsPage() {
           dbSemesters.map((s) => defaultSemesters.find((x) => x.id === s) || { id: s, label: AR_SEMESTER_LABELS[s] || s })
         );
       }
+      const preferredWindow = pickPreferredWindow(windows);
+      if (preferredWindow && !initializedPreferredWindowRef.current) {
+        initializedPreferredWindowRef.current = true;
+        setForm((prev) => ({
+          ...prev,
+          academic_year_label: String(preferredWindow.academic_year_label || prev.academic_year_label),
+          semester: String(preferredWindow.semester || prev.semester).trim().toLowerCase(),
+        }));
+      }
     } catch { /* silent */ }
   }, []);
 
@@ -389,6 +437,29 @@ export default function AdvisorRegistrationRequestsPage() {
       ]);
       if (seq !== studentSyncSeqRef.current) return;
       setPeriod(periodRes || { status: "CLOSED", is_open: false, window: null });
+      const profileMetrics = regRes?.student_profile || null;
+      if (profileMetrics) {
+        const nextGpa = Number(profileMetrics?.gpa ?? 0);
+        const nextPassedHours = Number(profileMetrics?.passed_hours ?? 0);
+        const nextStudyYear = Number(profileMetrics?.current_study_year ?? 0);
+        setSelectedStudent((prev) =>
+          prev
+            ? {
+                ...prev,
+                gpa: nextGpa,
+                passed_hours: nextPassedHours,
+                student_gpa: nextGpa,
+                student_passed_hours: nextPassedHours,
+                study_year: nextStudyYear || prev.study_year,
+                student_study_year: nextStudyYear || prev.student_study_year,
+              }
+            : prev
+        );
+        setAcademicMetricsDraft({
+          gpa: nextGpa.toFixed(2),
+          passed_hours: String(Math.round(nextPassedHours || 0)),
+        });
+      }
 
       const req = regRes?.request || null;
       const locked = Boolean(regRes?.is_locked) || isLockedReq(req);
@@ -534,8 +605,12 @@ export default function AdvisorRegistrationRequestsPage() {
         }));
 
       if (normalizedItems.length) {
-        const preferred = normalizedItems.find((row) => row.semester === String(form.semester || "").trim().toLowerCase());
-        const latest = preferred || normalizedItems[0];
+        const exactCurrent = normalizedItems.find(
+          (row) =>
+            row.academic_year_label === String(form.academic_year_label || "") &&
+            row.semester === String(form.semester || "").trim().toLowerCase()
+        );
+        const latest = exactCurrent || normalizedItems[0];
         return {
           academic_year_label: latest.academic_year_label,
           semester: latest.semester,
@@ -591,9 +666,12 @@ export default function AdvisorRegistrationRequestsPage() {
         return [...(Array.isArray(prev) ? prev : []), defaultSemesters.find((x) => x.id === sem) || { id: sem, label: getSemesterLabel(sem) }];
       });
 
+      const currentPeriodIsEditable = ["OPEN", "PENDING_REVIEW"].includes(normalizePeriodStatus(period?.status));
       const shouldAutoSwitch =
-        String(latestTerm.academic_year_label) !== String(form.academic_year_label) ||
-        String(latestTerm.semester).trim().toLowerCase() !== String(form.semester).trim().toLowerCase();
+        !currentPeriodIsEditable && (
+          String(latestTerm.academic_year_label) !== String(form.academic_year_label) ||
+          String(latestTerm.semester).trim().toLowerCase() !== String(form.semester).trim().toLowerCase()
+        );
 
       if (shouldAutoSwitch) {
         setForm((p) => ({ ...p, academic_year_label: latestTerm.academic_year_label, semester: String(latestTerm.semester).trim().toLowerCase() }));
@@ -603,7 +681,7 @@ export default function AdvisorRegistrationRequestsPage() {
     }
 
     syncStudentTermData(st.student_user_id, form.academic_year_label, form.semester);
-  }, [detectLatestStudentTerm, form, getSemesterLabel, showToast, syncStudentTermData]);
+  }, [detectLatestStudentTerm, form, getSemesterLabel, period?.status, showToast, syncStudentTermData]);
 
   const onJumpToDetectedTerm = useCallback(() => {
     if (!selectedStudent || !detectedStudentTerm) return;
@@ -741,6 +819,9 @@ export default function AdvisorRegistrationRequestsPage() {
       });
       showToast("تم حفظ المعدل والساعات المجتازة. سيظهر التحديث للطالب عند فتح الصفحة أو تحديثها.", "success");
       await loadRequests();
+      if (selectedStudent?.student_user_id) {
+        await syncStudentTermData(selectedStudent.student_user_id, form.academic_year_label, form.semester);
+      }
     } catch (e) {
       showToast(toArError(e?.message || "تعذر حفظ بيانات المعدل والساعات المجتازة."), "error");
     } finally {
@@ -779,7 +860,7 @@ export default function AdvisorRegistrationRequestsPage() {
     } finally {
       setProcessingId(null);
     }
-  }, [canReview, requestNotes, showToast, loadRequests]);
+  }, [canReview, requestNotes, showToast, loadRequests, selectedStudent, syncStudentTermData, form.academic_year_label, form.semester]);
 
   // Register request
   const onRegister = useCallback(async (requestId) => {
@@ -1080,9 +1161,22 @@ export default function AdvisorRegistrationRequestsPage() {
                   </div>
                 )}
                 {isOpen && regIsLocked && (
-                  <div style={{ marginTop: "1rem", padding: "1rem 1.25rem", borderRadius: "1rem", background: "rgba(107,114,128,0.06)", border: "1px solid rgba(107,114,128,0.15)", display: "flex", alignItems: "center", gap: 10, fontWeight: 700, fontSize: "0.85rem", color: "#374151" }}>
-                    <Lock size={20} />
-                    تسجيل هذا الطالب معتمد أو مقفل — لا يمكن التعديل.
+                  <div style={{ marginTop: "1rem", padding: "1rem 1.25rem", borderRadius: "1rem", background: "rgba(107,114,128,0.06)", border: "1px solid rgba(107,114,128,0.15)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontWeight: 700, fontSize: "0.85rem", color: "#374151", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <Lock size={20} />
+                      <span>الترم مفتوح، لكن طلب هذا الطالب حالته النهائية هي {reqStatusLabel(existingReq?.status)} لذلك لا يمكن التعديل مباشرة.</span>
+                    </div>
+                    {canAct && existingReq?.id && ["advisor_approved", "registered"].includes(String(existingReq?.status || "").toLowerCase()) && (
+                      <button
+                        className="ar-btn-info"
+                        type="button"
+                        disabled={processingId === existingReq.id}
+                        onClick={() => onDecision(existingReq.id, "need_info", existingReq?.status)}
+                      >
+                        {processingId === existingReq.id ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
+                        <span style={{ marginRight: 6 }}>إرجاع للمراجعة</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

@@ -4063,6 +4063,7 @@ async def registration_by_student(
     if not _can_manage_student_profile(db, student_user_id, current_user):
         raise HTTPException(status_code=403, detail="You cannot manage this student")
 
+    profile = _get_student_profile(db, student_user_id)
     req = _latest_registration_request(
         db,
         student_user_id=student_user_id,
@@ -4070,7 +4071,11 @@ async def registration_by_student(
         semester=semester,
     )
     if not req:
-        return {"request": None, "selections": []}
+        return {
+            "request": None,
+            "selections": [],
+            "student_profile": StudentProfileResponse.model_validate(profile).model_dump(mode="json"),
+        }
 
     selections = (
         db.query(RegistrationCourseSelection, CourseOffering, CourseCatalog)
@@ -4122,6 +4127,7 @@ async def registration_by_student(
         "is_locked": _is_request_locked_for_edit(req),
         "source": "core",
         "selections": items,
+        "student_profile": StudentProfileResponse.model_validate(profile).model_dump(mode="json"),
     }
 
 
