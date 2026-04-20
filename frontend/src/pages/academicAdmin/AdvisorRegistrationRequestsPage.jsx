@@ -20,6 +20,7 @@ import {
   searchAdvisorStudents,
   updateStudentAcademicMetrics,
 } from "../../services/advisorRegistrationApi";
+import { fetchAcademicState } from "../../services/academicApi";
 import { listAcademicCoreColleges } from "../../services/registrationPolicyApi";
 import { getCurrentAcademicYear } from "../../utils/academicData";
 import "../../css/AdvisorRegistrationPage.css";
@@ -349,7 +350,10 @@ export default function AdvisorRegistrationRequestsPage() {
   // Load initial metadata
   const loadMeta = useCallback(async () => {
     try {
-      const windowsData = await listRegistrationWindows();
+      const [windowsData, academicState] = await Promise.all([
+        listRegistrationWindows(),
+        fetchAcademicState().catch(() => null),
+      ]);
       const windows = Array.isArray(windowsData) ? windowsData : [];
       const dbYears = Array.from(new Set(windows.map((w) => String(w?.academic_year_label || "").trim()).filter(Boolean))).sort((a, b) => b.localeCompare(a));
       if (dbYears.length) setAcademicYearOptions(dbYears);
@@ -358,6 +362,25 @@ export default function AdvisorRegistrationRequestsPage() {
         setSemesterOptions(
           dbSemesters.map((s) => defaultSemesters.find((x) => x.id === s) || { id: s, label: AR_SEMESTER_LABELS[s] || s })
         );
+      }
+
+      const openSemesters =
+        academicState?.openSemesters && typeof academicState.openSemesters === "object"
+          ? academicState.openSemesters
+          : null;
+      const preferredSemester =
+        Object.entries(openSemesters || {}).find(([, isOpen]) => Boolean(isOpen))?.[0] ||
+        windows.find((w) => String(w?.status || "").trim().toUpperCase() === "OPEN")?.semester ||
+        "";
+      const preferredWindow = windows.find(
+        (w) => String(w?.semester || "").trim().toLowerCase() === String(preferredSemester || "").trim().toLowerCase()
+      );
+      if (preferredSemester) {
+        setForm((prev) => ({
+          ...prev,
+          academic_year_label: String(preferredWindow?.academic_year_label || dbYears[0] || prev.academic_year_label || "").trim(),
+          semester: String(preferredSemester || prev.semester || "").trim().toLowerCase(),
+        }));
       }
     } catch { /* silent */ }
   }, []);
@@ -591,14 +614,12 @@ export default function AdvisorRegistrationRequestsPage() {
         return [...(Array.isArray(prev) ? prev : []), defaultSemesters.find((x) => x.id === sem) || { id: sem, label: getSemesterLabel(sem) }];
       });
 
-      const shouldAutoSwitch =
+      const hasDetectedTermMismatch =
         String(latestTerm.academic_year_label) !== String(form.academic_year_label) ||
         String(latestTerm.semester).trim().toLowerCase() !== String(form.semester).trim().toLowerCase();
 
-      if (shouldAutoSwitch) {
-        setForm((p) => ({ ...p, academic_year_label: latestTerm.academic_year_label, semester: String(latestTerm.semester).trim().toLowerCase() }));
-        showToast(`تم التحويل تلقائيًا إلى آخر ترم مسجل: ${latestTerm.academic_year_label} — ${getSemesterLabel(latestTerm.semester)}`, "success");
-        return;
+      if (hasDetectedTermMismatch) {
+        showToast(`الطالب لديه تسجيل في ${latestTerm.academic_year_label} — ${getSemesterLabel(latestTerm.semester)}. استخدم زر الانتقال إذا أردت فتح هذا الترم.`, "success");
       }
     }
 

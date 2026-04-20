@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.deps import get_current_user, get_db, require_role
 from models.academic import AcademicState
-from models.academic_core import CourseCatalog, College, CollegeTrack, CourseOffering
+from models.academic_core import CourseCatalog, College, CollegeTrack, CourseOffering, StudentAcademicProfile
 from models.user import User
 from schemas.academic import (
     AcademicStatePayload,
@@ -62,6 +62,153 @@ DEFAULT_COLLEGE_POLICIES = {
         "levelThresholds": {"1": 0, "2": 30, "3": 60, "4": 90},
     },
 }
+
+PASSING_GRADE_CODES = {"A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "P", "PASS"}
+
+
+def _safe_float(value: Any, fallback: float | None = 0.0) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if numeric != numeric:
+        return fallback
+    return numeric
+
+
+def _normalize_publish_scope_key(raw_key: Any) -> tuple[str, str, str]:
+    parts = [str(part or "").strip() for part in str(raw_key or "").split("__")]
+    if len(parts) < 3:
+        return "", "", ""
+    return parts[0], parts[1].lower(), parts[2].lower()
+
+
+def _record_grade_to_points(record: dict[str, Any]) -> float | None:
+    grade = str(record.get("grade") or "").strip().upper()
+    grade_map = {
+        "A+": 4.0,
+        "A": 4.0,
+        "A-": 3.7,
+        "B+": 3.3,
+        "B": 3.0,
+        "B-": 2.7,
+        "C+": 2.3,
+        "C": 2.0,
+        "C-": 1.7,
+        "D+": 1.3,
+        "D": 1.0,
+        "P": 0.0,
+        "PASS": 0.0,
+        "F": 0.0,
+        "FA": 0.0,
+        "FF": 0.0,
+    }
+    if grade in grade_map:
+        return grade_map[grade]
+
+    total = _safe_float(record.get("total"), None)
+    if total is None:
+        return None
+    if total >= 90:
+        return 4.0
+    if total >= 80:
+        return 3.3
+    if total >= 70:
+        return 2.7
+    if total >= 60:
+        return 2.0
+    if total >= 50:
+        return 1.0
+    return 0.0
+
+
+def _is_passing_record(record: dict[str, Any]) -> bool:
+    grade = str(record.get("grade") or "").strip().upper()
+    if grade in PASSING_GRADE_CODES:
+        return True
+    total = _safe_float(record.get("total"), None)
+    return total is not None and total >= 50.0
+
+
+def _sync_student_profile_metrics_from_state(
+    db: Session,
+    academic_records: list[dict[str, Any]] | None,
+    grade_publish_map: dict[str, Any] | None,
+) -> None:
+    records = academic_records if isinstance(academic_records, list) else []
+    publish_map = grade_publish_map if isinstance(grade_publish_map, dict) else {}
+
+    published_final_terms = {
+        (academic_year, semester)
+        for raw_key, raw_status in publish_map.items()
+        for academic_year, semester, cycle in [_normalize_publish_scope_key(raw_key)]
+        if academic_year and semester and cycle == "final" and str(raw_status or "").strip().lower() == "published"
+    }
+    if not records:
+        return
+
+    student_rows: dict[int, dict[tuple[str, str, str], dict[str, Any]]] = {}
+    candidate_student_ids: set[int] = set()
+
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        student_user_id = int(_safe_float(item.get("studentId") or item.get("student_id"), -1) or -1)
+        if student_user_id <= 0:
+            continue
+        candidate_student_ids.add(student_user_id)
+        academic_year = str(item.get("academicYear") or item.get("academic_year") or "").strip()
+        semester = str(item.get("semester") or "").strip().lower()
+        if (academic_year, semester) not in published_final_terms:
+            continue
+
+        course_code = str(item.get("code") or item.get("courseCode") or "").strip().upper()
+        row_key = (academic_year, semester, course_code)
+        student_rows.setdefault(student_user_id, {})[row_key] = item
+
+    if not candidate_student_ids:
+        return
+
+    profiles = {
+        int(profile.student_user_id): profile
+        for profile in db.query(StudentAcademicProfile)
+        .filter(StudentAcademicProfile.student_user_id.in_(candidate_student_ids))
+        .all()
+    }
+
+    for student_user_id in candidate_student_ids:
+        # Skip students that have no published-final records in this sync cycle —
+        # overwriting with zeros would erase data earned in previous semesters.
+        published_records = student_rows.get(student_user_id, {})
+        if not published_records:
+            continue
+
+        profile = profiles.get(student_user_id)
+        if not profile:
+            profile = StudentAcademicProfile(student_user_id=student_user_id, current_study_year=1, gpa=0.0, passed_hours=0.0, is_active=True)
+            db.add(profile)
+            profiles[student_user_id] = profile
+
+        total_points = 0.0
+        total_credits = 0.0
+        passed_hours = 0.0
+
+        for record in published_records.values():
+            credits = _safe_float(record.get("credits") or record.get("credit_hours"), 0.0) or 0.0
+            if credits <= 0:
+                continue
+            points = _record_grade_to_points(record)
+            if points is None:
+                continue
+            total_points += points * credits
+            total_credits += credits
+            if _is_passing_record(record):
+                passed_hours += credits
+
+        # Only update if we actually computed something; preserve existing values otherwise.
+        if total_credits > 0:
+            profile.gpa = round(total_points / total_credits, 2)
+            profile.passed_hours = round(passed_hours, 2)
 
 
 def _default_state() -> AcademicState:
@@ -885,6 +1032,17 @@ async def put_academic_state(
                 "academic.state.put offering_sync_failed user_id=%s active_year=%s",
                 current_user.id,
                 active_year,
+            )
+        try:
+            _sync_student_profile_metrics_from_state(
+                db=db,
+                academic_records=payload.academicRecords if isinstance(payload.academicRecords, list) else [],
+                grade_publish_map=next_grade_publish_map,
+            )
+        except Exception:
+            logger.exception(
+                "academic.state.put profile_metrics_sync_failed user_id=%s",
+                current_user.id,
             )
     else:
         existing_registration_settings = _decode_json(state.registration_settings_json, {}) or {}
