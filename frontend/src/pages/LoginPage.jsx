@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Formik } from "formik";
 import { NavLink } from "react-router-dom";
@@ -12,6 +12,8 @@ import { Eye, EyeOff, GraduationCap, LifeBuoy, ShieldCheck, UserPlus, X } from "
 import { apiFetch } from "../services/api";
 import { useAccountRequestCatalog } from "../hooks/useAccountRequestCatalog";
 import ThemeToggle from "../components/common/ThemeToggle.jsx";
+
+const SESSION_NOTICE_KEY = "session_expired_notice";
 
 const Toast = Swal.mixin({
     toast: true,
@@ -66,6 +68,20 @@ const Basic = () => {
             return Number.isFinite(n) ? n <= 5 : true;
         });
     }, [accountRequestLevels, accountRequestForm.college]);
+
+    useEffect(() => {
+        const sessionNotice = String(localStorage.getItem(SESSION_NOTICE_KEY) || "").trim();
+        if (!sessionNotice) return;
+        localStorage.removeItem(SESSION_NOTICE_KEY);
+        window.setTimeout(() => {
+            Toast.fire({
+                icon: "info",
+                title: sessionNotice,
+                iconColor: "#05ADCF",
+                timer: 5000,
+            });
+        }, 50);
+    }, []);
 
     const handleAccountRequestSubmit = (e) => {
         e.preventDefault();
