@@ -10,7 +10,9 @@ import {
   advisorDecisionOnRequest,
   advisorManageRegistrationForStudent,
   advisorRegisterRequest,
+  getActiveRegistrationTerm,
   getCurrentRegistrationPeriodStatus,
+  getStudentProfileByAdvisor,
   getStudentRegistrationByAdvisor,
   listAdvisorRequests,
   listAdvisorStudents,
@@ -20,8 +22,9 @@ import {
   searchAdvisorStudents,
   updateStudentAcademicMetrics,
 } from "../../services/advisorRegistrationApi";
+import { fetchAcademicState } from "../../services/academicApi";
 import { listAcademicCoreColleges } from "../../services/registrationPolicyApi";
-import { getCurrentAcademicYear } from "../../utils/academicData";
+import { calculateSemesterGpa, getCurrentAcademicYear } from "../../utils/academicData";
 import "../../css/AdvisorRegistrationPage.css";
 
 /* ========================================================================= */
@@ -69,6 +72,51 @@ const resolveStudentIdentityLabel = (row) => {
   if (studentCode && !isPlaceholderStudentCode(studentCode)) return `كود ${studentCode}`;
   if (username) return `يوزر ${username}`;
   return `ID ${row?.student_user_id}`;
+};
+
+const collectStudentIdentifierKeys = (student) => {
+  const values = [
+    student?.student_user_id,
+    student?.id,
+    student?.username,
+    student?.student_username,
+    student?.student_code,
+    student?.email,
+  ];
+  return new Set(values.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean));
+};
+
+const resolveFallbackAcademicMetrics = (student, academicRecords) => {
+  const studentKeys = collectStudentIdentifierKeys(student);
+  if (!studentKeys.size) return { gpa: 0, passed_hours: 0 };
+
+  const matchedRecords = (Array.isArray(academicRecords) ? academicRecords : []).filter((record) => {
+    const recordKeys = [
+      record?.studentId,
+      record?.student_id,
+      record?.studentCode,
+      record?.student_code,
+      record?.username,
+      record?.userId,
+      record?.user_id,
+      record?.email,
+    ]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    return recordKeys.some((key) => studentKeys.has(key));
+  });
+
+  const passedHours = matchedRecords.reduce((sum, record) => {
+    const grade = String(record?.grade || "").trim().toUpperCase();
+    if (!grade || grade === "F") return sum;
+    const credits = Number(record?.credits ?? record?.hours ?? 0);
+    return sum + (Number.isFinite(credits) && credits > 0 ? credits : 0);
+  }, 0);
+
+  return {
+    gpa: Number(calculateSemesterGpa(matchedRecords) || 0),
+    passed_hours: Number(passedHours || 0),
+  };
 };
 
 const isLockedReq = (req) => {
@@ -153,6 +201,20 @@ const getPeriodReason = (periodObj) => {
   return "";
 };
 
+const withTimeout = async (promise, timeoutMs = 12000, message = "Request timed out") => {
+  let timerId;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timerId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timerId) clearTimeout(timerId);
+  }
+};
+
 /* ========================================================================= */
 /* TOAST HOOK                                                                 */
 /* ========================================================================= */
@@ -216,6 +278,7 @@ export default function AdvisorRegistrationRequestsPage() {
   const periodRequestSeqRef = useRef(0);
   const studentSyncSeqRef = useRef(0);
   const initializedPreferredWindowRef = useRef(false);
+  const [initializedWindow, setInitializedWindow] = useState(false);
 
   /* ---- Tab ---- */
   const [activeTab, setActiveTab] = useState("register"); // register | requests
@@ -236,6 +299,10 @@ export default function AdvisorRegistrationRequestsPage() {
   const isOpen = canEditInPeriod;
   const PeriodIcon = PERIOD_ICONS[periodStatus] || Lock;
   const periodReason = useMemo(() => getPeriodReason(period), [period]);
+  const headerIsLoading = !initializedWindow;
+  const displayPeriodStatus = headerIsLoading ? "INIT" : periodStatus;
+  const displayAdministrativeStatus = headerIsLoading ? "INIT" : administrativePeriodStatus;
+  const HeaderPeriodIcon = headerIsLoading ? Loader2 : PeriodIcon;
 
   /* ---- Search ---- */
   const [searchQuery, setSearchQuery] = useState("");
@@ -381,6 +448,19 @@ export default function AdvisorRegistrationRequestsPage() {
     );
   }, [semesterOptions]);
 
+  const selectedStudentCollegeLabel = useMemo(
+    () =>
+      String(
+        selectedStudent?.college_name ||
+        selectedStudent?.student_college_name ||
+        selectedStudent?.college ||
+        selectedStudent?.major ||
+        existingReq?.student_college_name ||
+        ""
+      ).trim() || "—",
+    [existingReq?.student_college_name, selectedStudent]
+  );
+
   /* ========================================================================= */
   /* DATA LOADERS                                                               */
   /* ========================================================================= */
@@ -388,8 +468,22 @@ export default function AdvisorRegistrationRequestsPage() {
   // Load initial metadata
   const loadMeta = useCallback(async () => {
     try {
-      const windowsData = await listRegistrationWindows();
-      const windows = Array.isArray(windowsData) ? windowsData : [];
+      let windows = [];
+      let activeTerm = null;
+
+      try {
+        activeTerm = await getActiveRegistrationTerm();
+      } catch {
+        activeTerm = null;
+      }
+
+      try {
+        const windowsData = await listRegistrationWindows();
+        windows = Array.isArray(windowsData) ? windowsData : [];
+      } catch {
+        windows = [];
+      }
+
       const dbYears = Array.from(new Set(windows.map((w) => String(w?.academic_year_label || "").trim()).filter(Boolean))).sort((a, b) => b.localeCompare(a));
       if (dbYears.length) setAcademicYearOptions(dbYears);
       const dbSemesters = Array.from(new Set(windows.map((w) => String(w?.semester || "").trim().toLowerCase()).filter(Boolean)));
@@ -398,9 +492,15 @@ export default function AdvisorRegistrationRequestsPage() {
           dbSemesters.map((s) => defaultSemesters.find((x) => x.id === s) || { id: s, label: AR_SEMESTER_LABELS[s] || s })
         );
       }
-      const preferredWindow = pickPreferredWindow(windows);
+      const preferredWindow = activeTerm?.window || pickPreferredWindow(windows);
       if (preferredWindow && !initializedPreferredWindowRef.current) {
         initializedPreferredWindowRef.current = true;
+        const nextStatus = normalizePeriodStatus(activeTerm?.status || getEffectiveWindowStatus(preferredWindow));
+        setPeriod({
+          status: nextStatus,
+          is_open: nextStatus === "OPEN",
+          window: preferredWindow,
+        });
         setForm((prev) => ({
           ...prev,
           academic_year_label: String(preferredWindow.academic_year_label || prev.academic_year_label),
@@ -408,6 +508,9 @@ export default function AdvisorRegistrationRequestsPage() {
         }));
       }
     } catch { /* silent */ }
+    finally {
+      setInitializedWindow(true);
+    }
   }, []);
 
   // Load period status (no student needed)
@@ -426,21 +529,63 @@ export default function AdvisorRegistrationRequestsPage() {
   }, []);
 
   // Sync student term data 
-  const syncStudentTermData = useCallback(async (studentId, ayLabel, semester) => {
+  const syncStudentTermData = useCallback(async (studentId, ayLabel, semester, studentSnapshot = null) => {
     if (!studentId) return;
     const seq = ++studentSyncSeqRef.current;
     try {
       setLoadingTermData(true);
-      const [periodRes, regRes] = await Promise.all([
-        getCurrentRegistrationPeriodStatus({ student_user_id: studentId, academic_year_label: ayLabel, semester }),
-        getStudentRegistrationByAdvisor({ student_user_id: studentId, academic_year_label: ayLabel, semester }),
+      const [periodState, registrationState, profileState, academicStateResult] = await Promise.allSettled([
+        withTimeout(
+          getCurrentRegistrationPeriodStatus({ student_user_id: studentId, academic_year_label: ayLabel, semester }),
+          10000,
+          "Timed out while loading registration period status"
+        ),
+        withTimeout(
+          getStudentRegistrationByAdvisor({ student_user_id: studentId, academic_year_label: ayLabel, semester }),
+          12000,
+          "Timed out while loading student registration data"
+        ),
+        withTimeout(
+          getStudentProfileByAdvisor(studentId),
+          10000,
+          "Timed out while loading student academic profile"
+        ),
+        withTimeout(
+          fetchAcademicState(),
+          10000,
+          "Timed out while loading academic state"
+        ),
       ]);
       if (seq !== studentSyncSeqRef.current) return;
-      setPeriod(periodRes || { status: "CLOSED", is_open: false, window: null });
-      const profileMetrics = regRes?.student_profile || null;
+      const periodRes = periodState.status === "fulfilled" ? periodState.value : null;
+      const regRes = registrationState.status === "fulfilled" ? registrationState.value : null;
+      const profileRes = profileState.status === "fulfilled" ? profileState.value : null;
+      const academicState = academicStateResult.status === "fulfilled" ? academicStateResult.value : null;
+
+      if (periodRes) {
+        setPeriod(periodRes);
+      }
+
+      if (!regRes) {
+        if (registrationState.status === "rejected") {
+          showToast("تحميل بيانات الطالب استغرق وقتًا طويلًا. يمكنك متابعة المواد الحالية ثم إعادة التحميل.", "error");
+        }
+        return;
+      }
+
+      const profileMetrics = profileRes || regRes?.student_profile || null;
       if (profileMetrics) {
-        const nextGpa = Number(profileMetrics?.gpa ?? 0);
-        const nextPassedHours = Number(profileMetrics?.passed_hours ?? 0);
+        const fallbackMetrics = resolveFallbackAcademicMetrics(
+          {
+            student_user_id: studentId,
+            username: studentSnapshot?.username || regRes?.request?.student_username || "",
+            student_code: studentSnapshot?.student_code || regRes?.request?.student_code || "",
+            id: studentSnapshot?.id,
+          },
+          academicState?.academicRecords
+        );
+        const nextGpa = Number(profileMetrics?.gpa ?? fallbackMetrics.gpa ?? 0) || Number(fallbackMetrics.gpa || 0);
+        const nextPassedHours = Number(profileMetrics?.passed_hours ?? fallbackMetrics.passed_hours ?? 0) || Number(fallbackMetrics.passed_hours || 0);
         const nextStudyYear = Number(profileMetrics?.current_study_year ?? 0);
         setSelectedStudent((prev) =>
           prev
@@ -493,7 +638,11 @@ export default function AdvisorRegistrationRequestsPage() {
         const canLoadAllOfferings = ["OPEN", "PENDING_REVIEW"].includes(normalizePeriodStatus(periodRes?.status));
         if (canLoadAllOfferings) {
           try {
-            const fullRes = await listOfferingsForStudent(studentId, ayLabel, semester, { openOnly: false });
+            const fullRes = await withTimeout(
+              listOfferingsForStudent(studentId, ayLabel, semester, { openOnly: false }),
+              10000,
+              "Timed out while loading student offerings"
+            );
             const fullItems = Array.isArray(fullRes?.items) ? fullRes.items : [];
             if (fullItems.length) {
               const mapById = new Map(
@@ -666,7 +815,7 @@ export default function AdvisorRegistrationRequestsPage() {
         return [...(Array.isArray(prev) ? prev : []), defaultSemesters.find((x) => x.id === sem) || { id: sem, label: getSemesterLabel(sem) }];
       });
 
-      const currentPeriodIsEditable = ["OPEN", "PENDING_REVIEW"].includes(normalizePeriodStatus(period?.status));
+      const currentPeriodIsEditable = true; // Keep the chosen active term; old student history should not auto-switch the page.
       const shouldAutoSwitch =
         !currentPeriodIsEditable && (
           String(latestTerm.academic_year_label) !== String(form.academic_year_label) ||
@@ -680,7 +829,7 @@ export default function AdvisorRegistrationRequestsPage() {
       }
     }
 
-    syncStudentTermData(st.student_user_id, form.academic_year_label, form.semester);
+    syncStudentTermData(st.student_user_id, form.academic_year_label, form.semester, st);
   }, [detectLatestStudentTerm, form, getSemesterLabel, period?.status, showToast, syncStudentTermData]);
 
   const onJumpToDetectedTerm = useCallback(() => {
@@ -906,7 +1055,10 @@ export default function AdvisorRegistrationRequestsPage() {
   /* EFFECTS                                                                    */
   /* ========================================================================= */
   useEffect(() => { loadMeta(); }, [loadMeta]);
-  useEffect(() => { loadPeriodStatus(form.academic_year_label, form.semester); }, [form.academic_year_label, form.semester, loadPeriodStatus]);
+  useEffect(() => {
+    if (!initializedWindow) return;
+    loadPeriodStatus(form.academic_year_label, form.semester);
+  }, [form.academic_year_label, form.semester, initializedWindow, loadPeriodStatus]);
   useEffect(() => { loadRequests(); }, [loadRequests]);
   useEffect(() => {
     setSectionSwapDraft((prev) => {
@@ -920,9 +1072,10 @@ export default function AdvisorRegistrationRequestsPage() {
     });
   }, [selectedOfferings]);
   useEffect(() => {
-    if (!selectedStudent) return;
-    syncStudentTermData(selectedStudent.student_user_id, form.academic_year_label, form.semester, selectedStudent);
-  }, [form.academic_year_label, form.semester, selectedStudent, syncStudentTermData]);
+    const studentId = selectedStudent?.student_user_id;
+    if (!studentId) return;
+    syncStudentTermData(studentId, form.academic_year_label, form.semester, selectedStudent);
+  }, [form.academic_year_label, form.semester, selectedStudent?.student_user_id, syncStudentTermData]);
 
   /* ========================================================================= */
   /* RENDER                                                                     */
@@ -932,13 +1085,13 @@ export default function AdvisorRegistrationRequestsPage() {
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
 
         {/* ===== PERIOD STATUS HEADER ===== */}
-        <div className={`ar-period-header status-${periodStatus} ar-animate-in`}>
+        <div className={`ar-period-header status-${displayPeriodStatus} ar-animate-in`}>
           <div style={{ position: "relative", zIndex: 2 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
               <div>
                 <h1 style={{ fontSize: "1.6rem", fontWeight: 900, margin: 0 }}>{t("admin.advisorRegistration.title")}</h1>
                 <p style={{ fontSize: "0.85rem", opacity: 0.85, marginTop: 6, fontWeight: 500 }}>
-                  {PERIOD_MESSAGES[periodStatus] || PERIOD_MESSAGES.CLOSED}
+                  {headerIsLoading ? "جاري تحديد حالة فترة التسجيل..." : (PERIOD_MESSAGES[periodStatus] || PERIOD_MESSAGES.CLOSED)}
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -948,15 +1101,15 @@ export default function AdvisorRegistrationRequestsPage() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.14)", borderRadius: "999px", padding: "0.5rem 1rem", fontWeight: 800, fontSize: "0.8rem" }}>
                   <ShieldCheck size={16} />
-                  {t("admin.advisorRegistration.adminStateOpen")}: {PERIOD_LABELS[administrativePeriodStatus] || t("admin.advisorRegistration.status.closed")}
+                  {t("admin.advisorRegistration.adminStateOpen")}: {headerIsLoading ? "جاري التحميل" : (PERIOD_LABELS[displayAdministrativeStatus] || t("admin.advisorRegistration.status.closed"))}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.2)", borderRadius: "999px", padding: "0.5rem 1.25rem", fontWeight: 800, fontSize: "0.85rem" }}>
-                  <PeriodIcon size={18} />
-                  {t("admin.advisorRegistration.actualStateOpen")}: {PERIOD_LABELS[periodStatus] || t("admin.advisorRegistration.status.closed")}
+                  <HeaderPeriodIcon size={18} className={headerIsLoading ? "animate-spin" : ""} />
+                  {t("admin.advisorRegistration.actualStateOpen")}: {headerIsLoading ? "جاري التحميل" : (PERIOD_LABELS[displayPeriodStatus] || t("admin.advisorRegistration.status.closed"))}
                 </div>
               </div>
             </div>
-            {periodReason ? (
+            {!headerIsLoading && periodReason ? (
               <p style={{ marginTop: 8, marginBottom: 0, fontSize: "0.78rem", fontWeight: 700, opacity: 0.95 }}>
                 {periodReason}
               </p>
@@ -1061,9 +1214,11 @@ export default function AdvisorRegistrationRequestsPage() {
                       <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.8rem", fontWeight: 600, color: "var(--ar-text-secondary)" }}>
                         <User size={14} /> {selectedStudent.username || "—"}
                       </span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.8rem", fontWeight: 600, color: "var(--ar-text-secondary)" }}>
-                        <Building2 size={14} /> {selectedStudent.college_name || "—"}
-                      </span>
+                      {selectedStudentCollegeLabel !== "—" && (
+                        <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.8rem", fontWeight: 600, color: "var(--ar-text-secondary)" }}>
+                          <Building2 size={14} /> {selectedStudentCollegeLabel}
+                        </span>
+                      )}
                       <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.8rem", fontWeight: 600, color: "var(--ar-text-secondary)" }}>
                         <GraduationCap size={14} /> السنة {selectedStudent.study_year || "—"}
                       </span>
@@ -1097,14 +1252,15 @@ export default function AdvisorRegistrationRequestsPage() {
 
                 <div style={{ marginTop: "1rem", padding: "1rem", borderRadius: "0.9rem", border: "1px solid var(--ar-border)", background: "var(--ar-surface-soft)" }}>
                   <div style={{ fontWeight: 800, fontSize: "0.85rem", color: "var(--ar-text-secondary)", marginBottom: "0.75rem" }}>
-                    Student Academic Metrics
+                    البيانات الأكاديمية للطالب
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.75rem", alignItems: "end" }}>
                     <div>
-                      <label style={{ display: "block", marginBottom: 6, fontSize: "0.75rem", fontWeight: 700, color: "var(--ar-text-muted)" }}>GPA Total</label>
+                      <label style={{ display: "block", marginBottom: 6, fontSize: "0.75rem", fontWeight: 700, color: "var(--ar-text-muted)" }}>المعدل التراكمي</label>
                       <input
                         className="ar-input"
                         type="number"
+                        dir="ltr"
                         min="0"
                         max="4"
                         step="0.01"
@@ -1121,10 +1277,11 @@ export default function AdvisorRegistrationRequestsPage() {
                       />
                     </div>
                     <div>
-                      <label style={{ display: "block", marginBottom: 6, fontSize: "0.75rem", fontWeight: 700, color: "var(--ar-text-muted)" }}>Passed Hours</label>
+                      <label style={{ display: "block", marginBottom: 6, fontSize: "0.75rem", fontWeight: 700, color: "var(--ar-text-muted)" }}>الساعات المجتازة</label>
                       <input
                         className="ar-input"
                         type="number"
+                        dir="ltr"
                         min="0"
                         step="1"
                         value={academicMetricsDraft.passed_hours}

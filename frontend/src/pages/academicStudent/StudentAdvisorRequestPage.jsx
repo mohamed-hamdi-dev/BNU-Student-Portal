@@ -1,6 +1,8 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import {
   createAdvisorRequest,
+  getActiveRegistrationTerm,
+  getCurrentRegistrationPeriodStatus,
   listMyAdvisorRequests,
   listMyAvailableOfferings,
 } from "../../services/advisorRegistrationApi";
@@ -47,6 +49,23 @@ const REQUEST_STATUS_TONES = {
 
 const statusLabel = (status) => REQUEST_STATUS_LABELS[String(status || "").trim().toLowerCase()] || String(status || "-");
 const statusTone = (status) => REQUEST_STATUS_TONES[String(status || "").trim().toLowerCase()] || "bg-slate-50 text-slate-700 border-slate-200";
+const toDateSafe = (value) => {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const normalizeWindowStatus = (value) => {
+  const s = String(value || "").trim().toUpperCase();
+  return ["OPEN", "PENDING_REVIEW", "APPROVED", "LOCKED", "CLOSED"].includes(s) ? s : "CLOSED";
+};
+const getEffectiveWindowStatus = (windowRow) => {
+  if (!windowRow || !Boolean(windowRow.is_active)) return "CLOSED";
+  const now = new Date();
+  const openAt = toDateSafe(windowRow.open_at || windowRow.starts_at);
+  const closeAt = toDateSafe(windowRow.close_at || windowRow.ends_at);
+  if (openAt && now < openAt) return "CLOSED";
+  if (closeAt && now > closeAt) return "CLOSED";
+  return normalizeWindowStatus(windowRow.status);
+};
 
 export default function StudentAdvisorRequestPage() {
   const [academicYear, setAcademicYear] = useState(() => getCurrentAcademicYear() || "2025-2026");
@@ -57,6 +76,7 @@ export default function StudentAdvisorRequestPage() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [initializedWindow, setInitializedWindow] = useState(false);
 
   const selectedHours = useMemo(
     () =>
@@ -83,14 +103,39 @@ export default function StudentAdvisorRequestPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, [academicYear, semester]);
+    let active = true;
+    const loadPreferredWindow = async () => {
+      try {
+        const currentYear = getCurrentAcademicYear() || "2025-2026";
+        const preferred = await getActiveRegistrationTerm({ academic_year_label: currentYear });
+        if (!active) return;
+        if (preferred) {
+          setAcademicYear(String(preferred.academic_year_label || currentYear));
+          setSemester(String(preferred.semester || "autumn").trim().toLowerCase());
+        }
+      } catch {
+        // Keep defaults if windows fail to load.
+      } finally {
+        if (active) setInitializedWindow(true);
+      }
+    };
+    loadPreferredWindow();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
+    if (!initializedWindow) return;
+    loadData();
+  }, [academicYear, semester, initializedWindow]);
+  useEffect(() => {
+    if (!initializedWindow) return;
     const timer = setInterval(() => {
       loadData();
     }, 20000);
     return () => clearInterval(timer);
-  }, [academicYear, semester]);
+  }, [academicYear, semester, initializedWindow]);
 
   const toggleOffering = (offeringId) => {
     setSelectedOfferings((prev) =>

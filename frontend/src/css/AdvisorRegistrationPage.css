@@ -77,6 +77,9 @@
 .ar-period-header.status-LOCKED {
   background: linear-gradient(135deg, #374151 0%, #4b5563 50%, #6b7280 100%);
 }
+.ar-period-header.status-INIT {
+  background: linear-gradient(135deg, #64748b 0%, #94a3b8 50%, #cbd5e1 100%);
+}
 
 /* --- Status Badge --- */
 .ar-status-badge {
@@ -560,6 +563,34 @@
 }
 .ar-select:focus { border-color: #05ADCF; }
 
+/* --- Input --- */
+.ar-input {
+  width: 100%;
+  height: 2.75rem;
+  padding: 0 1rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 0.875rem;
+  background: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: 'Tajawal', sans-serif;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+.ar-input:focus {
+  border-color: #05ADCF;
+  box-shadow: 0 0 0 4px rgba(5, 173, 207, 0.1);
+}
+.ar-input:disabled {
+  background: #f8fafc;
+  color: #475569;
+  cursor: not-allowed;
+}
+
 /* --- Textarea --- */
 .ar-textarea {
   width: 100%;
@@ -652,12 +683,12 @@
   background: #244367;
   color: #f8fafc;
 }
-.dark .ar-select, .dark .ar-textarea {
+.dark .ar-input, .dark .ar-select, .dark .ar-textarea {
   background: #162b4d;
   border-color: #2b4a74;
   color: #f8fafc;
 }
-.dark .ar-select:focus, .dark .ar-textarea:focus {
+.dark .ar-input:focus, .dark .ar-select:focus, .dark .ar-textarea:focus {
   border-color: #05ADCF;
 }
 .dark .ar-btn-secondary {

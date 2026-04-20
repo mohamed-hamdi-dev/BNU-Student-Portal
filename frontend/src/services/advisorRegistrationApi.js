@@ -47,6 +47,9 @@ export const updateStudentAcademicMetrics = (studentUserId, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const getStudentProfileByAdvisor = (studentUserId) =>
+  apiFetch(`/api/academic-core/student-profiles/${studentUserId}`);
+
 export const exportSectionsReportUrl = (params = {}) => {
   const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
   const search = new URLSearchParams();
@@ -131,6 +134,16 @@ export const getCurrentRegistrationPeriodStatus = (params = {}) => {
     search.set(key, String(value));
   });
   return apiFetch(`/api/academic-core/registration/current-period-status?${search.toString()}`);
+};
+
+export const getActiveRegistrationTerm = (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const qs = search.toString();
+  return apiFetch(`/api/academic-core/registration/active-term${qs ? `?${qs}` : ""}`);
 };
 
 export const getStudentRegistrationByAdvisor = (params = {}) => {

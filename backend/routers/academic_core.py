@@ -368,6 +368,99 @@ def _get_student_profile(db: Session, student_user_id: int) -> StudentAcademicPr
     return row
 
 
+def _normalize_legacy_student_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _legacy_student_identifier_keys(user: User | None) -> set[str]:
+    if not user:
+        return set()
+    candidates = {
+        str(user.id or ""),
+        str(user.username or ""),
+        str(user.student_code or ""),
+        str(user.email or ""),
+    }
+    return {_normalize_legacy_student_key(item) for item in candidates if str(item or "").strip()}
+
+
+def _safe_float(value: Any, fallback: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+        return parsed if parsed >= 0 else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _load_legacy_student_metrics(db: Session, user: User | None) -> tuple[float, float]:
+    keys = _legacy_student_identifier_keys(user)
+    if not keys:
+        return 0.0, 0.0
+
+    state = db.query(AcademicState).order_by(AcademicState.updated_at.desc()).first()
+    if not state:
+        return 0.0, 0.0
+
+    records = _safe_json_load(getattr(state, "academic_records_json", None), [])
+    if not isinstance(records, list):
+        return 0.0, 0.0
+
+    total_points = 0.0
+    total_credits = 0.0
+    passed_hours = 0.0
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        record_keys = {
+            _normalize_legacy_student_key(record.get("studentId")),
+            _normalize_legacy_student_key(record.get("student_id")),
+            _normalize_legacy_student_key(record.get("studentCode")),
+            _normalize_legacy_student_key(record.get("student_code")),
+            _normalize_legacy_student_key(record.get("username")),
+            _normalize_legacy_student_key(record.get("userId")),
+            _normalize_legacy_student_key(record.get("user_id")),
+            _normalize_legacy_student_key(record.get("email")),
+        }
+        record_keys.discard("")
+        if not record_keys.intersection(keys):
+            continue
+
+        grade = str(record.get("grade") or "").strip().upper()
+        credits = _safe_float(record.get("credits"), 0.0)
+        if credits <= 0:
+            credits = _safe_float(record.get("hours"), 0.0)
+        if credits <= 0:
+            credits = 3.0
+
+        if grade:
+            total_points += (_grade_to_gpa_points(grade, None, None) or 0.0) * credits
+            total_credits += credits
+            if grade != "F":
+                passed_hours += credits
+
+    gpa = round(total_points / total_credits, 2) if total_credits > 0 else 0.0
+    return gpa, round(passed_hours, 2)
+
+
+def _get_live_student_profile(db: Session, student_user_id: int) -> StudentAcademicProfile:
+    profile = _get_student_profile(db, student_user_id)
+    profile = _sync_student_profile_academic_metrics_from_published_grades(db, profile)
+    user = db.query(User).filter(User.id == student_user_id).first()
+    legacy_gpa, legacy_passed_hours = _load_legacy_student_metrics(db, user)
+    current_gpa = float(profile.gpa or 0.0)
+    current_passed_hours = float(getattr(profile, "passed_hours", 0.0) or 0.0)
+    if legacy_gpa > 0 and current_gpa <= 0:
+        profile.gpa = legacy_gpa
+    if legacy_passed_hours > 0 and current_passed_hours <= 0:
+        profile.passed_hours = legacy_passed_hours
+    if float(profile.gpa or 0.0) != current_gpa or float(getattr(profile, "passed_hours", 0.0) or 0.0) != current_passed_hours:
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+    return profile
+
+
 def _get_or_create_finance_status(db: Session, student_user_id: int) -> StudentFinanceStatus:
     row = db.query(StudentFinanceStatus).filter(StudentFinanceStatus.student_user_id == student_user_id).first()
     if row:
@@ -470,6 +563,57 @@ def _effective_window_status(window: RegistrationWindow | None) -> str:
     if not bool(window.is_active):
         return "CLOSED"
     return "CLOSED"
+
+
+def _registration_window_sort_key(window: RegistrationWindow | None) -> tuple[int, int, int, float]:
+    if not window:
+        return (0, 0, 0, 0.0)
+    status_weight = {"OPEN": 5, "PENDING_REVIEW": 4, "APPROVED": 3, "LOCKED": 2, "CLOSED": 1}
+    semester_weight = {"autumn": 3, "spring": 2, "summer": 1}
+    status_value = _effective_window_status(window)
+    label = str(getattr(window, "academic_year_label", "") or "")
+    semester = str(getattr(window, "semester", "") or "").strip().lower()
+    try:
+        year_start = int(label.split("-")[0])
+    except Exception:
+        year_start = 0
+    updated_at = _normalize_dt_for_compare(getattr(window, "updated_at", None))
+    updated_ts = updated_at.timestamp() if updated_at else 0.0
+    return (
+        status_weight.get(status_value, 0),
+        year_start,
+        semester_weight.get(semester, 0),
+        updated_ts,
+    )
+
+
+def _best_registration_window(
+    db: Session,
+    *,
+    college_id: int | None = None,
+    academic_year_label: str | None = None,
+) -> RegistrationWindow | None:
+    q = db.query(RegistrationWindow).filter(RegistrationWindow.is_active == True)  # noqa: E712
+    if academic_year_label:
+        q = q.filter(RegistrationWindow.academic_year_label == academic_year_label)
+    if college_id is not None:
+        q = q.filter(or_(RegistrationWindow.college_id == college_id, RegistrationWindow.college_id.is_(None)))
+    rows = q.all()
+    if not rows and college_id is not None:
+        rows = (
+            db.query(RegistrationWindow)
+            .filter(
+                RegistrationWindow.is_active == True,  # noqa: E712
+                RegistrationWindow.college_id.is_(None),
+            )
+            .all()
+        )
+        if academic_year_label:
+            rows = [row for row in rows if str(row.academic_year_label or "") == str(academic_year_label)]
+    if not rows:
+        return None
+    rows.sort(key=_registration_window_sort_key, reverse=True)
+    return rows[0]
 
 
 def _term_window(
@@ -716,18 +860,22 @@ async def list_advisor_students(
     rows = query.order_by(User.full_name.asc()).limit(limit).all()
     items = []
     for profile, user, college in rows:
+        live_profile = _get_live_student_profile(db, int(user.id)) if profile else None
+        live_college = college
+        if live_profile and live_profile.college_id and (not college or int(college.id) != int(live_profile.college_id)):
+            live_college = db.query(College).filter(College.id == live_profile.college_id).first()
         items.append(
             {
                 "student_user_id": int(user.id),
                 "username": user.username,
                 "full_name": user.full_name,
                 "student_code": user.student_code,
-                "college_id": profile.college_id if profile else None,
-                "college_name": college.name_ar if college else None,
-                "study_year": profile.current_study_year if profile else 1,
-                "advisor_user_id": profile.advisor_user_id if profile else None,
-                "gpa": float(profile.gpa or 0) if profile else 0,
-                "passed_hours": float(getattr(profile, "passed_hours", 0) or 0) if profile else 0,
+                "college_id": live_profile.college_id if live_profile else None,
+                "college_name": (live_college.name_ar if live_college else None) or getattr(user, "college", None),
+                "study_year": live_profile.current_study_year if live_profile else 1,
+                "advisor_user_id": live_profile.advisor_user_id if live_profile else None,
+                "gpa": float(live_profile.gpa or 0) if live_profile else 0,
+                "passed_hours": float(getattr(live_profile, "passed_hours", 0) or 0) if live_profile else 0,
             }
         )
     return {"items": items}
@@ -2443,6 +2591,17 @@ async def update_student_academic_metrics(
     return row
 
 
+@router.get("/student-profiles/{student_user_id}", response_model=StudentProfileResponse, dependencies=[Depends(require_role("admin", "advisor"))])
+async def get_student_profile_for_staff(
+    student_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_manage_student_profile(db, student_user_id, current_user):
+        raise HTTPException(status_code=403, detail="You cannot manage this student")
+    return _get_live_student_profile(db, student_user_id)
+
+
 @router.get("/student-profiles/me", response_model=StudentProfileResponse)
 async def my_profile(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "student":
@@ -2632,6 +2791,44 @@ async def get_current_period_status(
     )
     status_value = _effective_window_status(window)
     return {
+        "status": status_value,
+        "is_open": status_value == "OPEN",
+        "window": RegistrationWindowResponse.model_validate(window).model_dump(mode="json") if window else None,
+    }
+
+
+@router.get("/registration/active-term", dependencies=[Depends(require_role("admin", "advisor", "student"))])
+async def get_active_registration_term(
+    academic_year_label: str | None = None,
+    student_user_id: int | None = None,
+    college_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    role = str(current_user.role or "").lower()
+    effective_college_id = college_id
+    skip_manage_check = False
+    if role == "student":
+        if student_user_id and int(student_user_id) != int(current_user.id):
+            raise HTTPException(status_code=403, detail="You cannot access another student active term")
+        profile = _get_student_profile(db, current_user.id)
+        effective_college_id = profile.college_id
+        student_user_id = current_user.id
+        skip_manage_check = True
+    if student_user_id:
+        if (not skip_manage_check) and (not _can_manage_student_profile(db, student_user_id, current_user)):
+            raise HTTPException(status_code=403, detail="You cannot manage this student")
+        effective_college_id = _get_student_profile(db, student_user_id).college_id
+
+    window = _best_registration_window(
+        db,
+        college_id=effective_college_id,
+        academic_year_label=academic_year_label,
+    )
+    status_value = _effective_window_status(window)
+    return {
+        "academic_year_label": getattr(window, "academic_year_label", None),
+        "semester": getattr(window, "semester", None),
         "status": status_value,
         "is_open": status_value == "OPEN",
         "window": RegistrationWindowResponse.model_validate(window).model_dump(mode="json") if window else None,
@@ -4063,7 +4260,7 @@ async def registration_by_student(
     if not _can_manage_student_profile(db, student_user_id, current_user):
         raise HTTPException(status_code=403, detail="You cannot manage this student")
 
-    profile = _get_student_profile(db, student_user_id)
+    profile = _get_live_student_profile(db, student_user_id)
     req = _latest_registration_request(
         db,
         student_user_id=student_user_id,
