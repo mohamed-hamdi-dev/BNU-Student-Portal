@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class StorageBase(BaseModel):
     file_name: str = Field(..., max_length=255)
-    level: str | None = None
+    level: str | None = Field(None, max_length=255)
     category: str | None = Field(None, max_length=100)
     is_favorite: bool = False
     is_indexed: bool = False
@@ -18,7 +18,7 @@ class StorageCreate(StorageBase):
 
 class StorageUpdate(BaseModel):
     file_name: str | None = Field(None, max_length=255)
-    level: str | None = None
+    level: str | None = Field(None, max_length=255)
     category: str | None = Field(None, max_length=100)
     is_favorite: bool | None = None
     is_indexed: bool | None = None

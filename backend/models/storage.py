@@ -10,7 +10,7 @@ class StorageItem(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_name = Column(String(255), nullable=False)
-    level = Column(String(20), nullable=True)
+    level = Column(String(255), nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     category = Column(String(100), nullable=True)
     is_favorite = Column(Boolean, nullable=False, default=False)
