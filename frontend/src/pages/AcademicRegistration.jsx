@@ -24,6 +24,15 @@ const normalizeRequestStatus = (value) =>
         .trim()
         .toLowerCase()
         .replace(/[\s-]+/g, "_");
+const normalizeStudentIdentifier = (value) => String(value || "").trim();
+const collectStudentIdentifiers = (...values) => {
+    const keys = new Set();
+    values.forEach((value) => {
+        const normalized = normalizeStudentIdentifier(value);
+        if (normalized) keys.add(normalized);
+    });
+    return keys;
+};
 
 const SCHEDULE_PALETTE = [
     { surface: "bg-sky-50", border: "border-sky-200", chip: "bg-sky-100 text-sky-800", accent: "text-sky-900", meta: "text-sky-700", pdfFill: [240, 249, 255], pdfText: [12, 74, 110], pdfBorder: [186, 230, 253] },
@@ -166,7 +175,7 @@ const App = () => {
         }
         return {
             name: data?.name || data?.NameID || t("academic_reg_student_default"),
-            id: data?.studentId || data?.username || "-",
+            id: data?.studentId || data?.studentCode || data?.student_code || data?.username || "-",
             gpa,
             completedHours,
             major: data?.major || t("academic_reg_major_default"),
@@ -174,17 +183,28 @@ const App = () => {
             maxHours: Number(data?.maxHours || 18),
         };
     }, [registrationSettings?.activeAcademicYear, t, serverProfileMetrics]);
+    const studentIdentifiers = useMemo(() => {
+        const saved = localStorage.getItem("loggedUser");
+        const data = saved ? JSON.parse(saved) : {};
+        return collectStudentIdentifiers(
+            data?.studentId,
+            data?.student_id,
+            data?.studentCode,
+            data?.student_code,
+            data?.username,
+            data?.id
+        );
+    }, []);
     const fallbackCompletedRecords = useMemo(() => {
-        const studentId = String(studentInfo.id || "").trim();
-        if (!studentId) return [];
+        if (!studentIdentifiers.size) return [];
         return (Array.isArray(academicRecords) ? academicRecords : []).filter((record) => {
-            const recordStudentId = String(record?.studentId || record?.student_id || "").trim();
-            if (recordStudentId !== studentId) return false;
+            const recordStudentId = normalizeStudentIdentifier(record?.studentId || record?.student_id || record?.studentCode || record?.student_code || record?.username);
+            if (!studentIdentifiers.has(recordStudentId)) return false;
             const grade = String(record?.grade || "").trim().toUpperCase();
             const status = String(record?.status || "").trim().toLowerCase();
             return Boolean(grade) || status === "graded" || status === "completed" || status === "مكتمل";
         });
-    }, [academicRecords, studentInfo.id]);
+    }, [academicRecords, studentIdentifiers]);
     const fallbackCompletedHours = useMemo(
         () =>
             fallbackCompletedRecords.reduce((sum, record) => {

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Printer, Award, Clock, ChevronDown, GraduationCap, Calendar } from "lucide-react";
 import { SystemContext } from "../context/SystemContext";
 import { calculateSemesterGpa, normalizeCourse, normalizeSemesterValue } from "../utils/academicData";
-import { listMyAdvisorRequests, getMyStudentProfile } from "../services/advisorRegistrationApi";
+import { listMyAdvisorRequests, getMyStudentProfile, getMyRegistration } from "../services/advisorRegistrationApi";
 
 const APPROVED_REGISTRATION_STATUSES = new Set(["registered", "approved", "locked", "graded"]);
 const safeParse = (value, fallback) => {
@@ -15,6 +15,17 @@ const safeParse = (value, fallback) => {
     }
 };
 const selectionKey = (academicYear, semester, cycle) => `${academicYear || ""}__${semester || ""}__${cycle}`;
+const recordKey = (record = {}) =>
+    `${record.studentId || ""}__${record.code || record.id || ""}__${record.semester || ""}__${record.academicYear || ""}`;
+const normalizeStudentIdentifier = (value) => String(value || "").trim();
+const collectStudentIdentifiers = (...values) => {
+    const keys = new Set();
+    values.forEach((value) => {
+        const normalized = normalizeStudentIdentifier(value);
+        if (normalized) keys.add(normalized);
+    });
+    return keys;
+};
 
 const displayValue = (value) => (value === undefined || value === null || value === "" ? "-" : value);
 const hasActualValue = (value) => value !== undefined && value !== null && String(value).trim() !== "";
@@ -414,6 +425,7 @@ export default function CourseTablePage() {
     const navigate = useNavigate();
     const { academicRecords, semesterNames, courses: systemCourses, studentRegistrations = [], gradePublishMap: publishMap = {} } = useContext(SystemContext);
     const [approvedTermsFromRequests, setApprovedTermsFromRequests] = useState(() => new Set());
+    const [fallbackRegistrationRecords, setFallbackRegistrationRecords] = useState([]);
     const [profileStats, setProfileStats] = useState({ gpa: 0, hours: 0 });
     const [hasServerProfile, setHasServerProfile] = useState(false);
 
@@ -425,7 +437,19 @@ export default function CourseTablePage() {
         }
     }, []);
 
-    const studentId = String(student.studentId || student.username || "");
+    const studentIdentifiers = useMemo(
+        () =>
+            collectStudentIdentifiers(
+                student.studentId,
+                student.student_id,
+                student.studentCode,
+                student.student_code,
+                student.username,
+                student.id
+            ),
+        [student]
+    );
+    const studentId = useMemo(() => Array.from(studentIdentifiers)[0] || "", [studentIdentifiers]);
     useEffect(() => {
         let active = true;
         const loadRequestTerms = async () => {
@@ -451,8 +475,56 @@ export default function CourseTablePage() {
                     approved.add(`${year}__${semester}`);
                 });
                 setApprovedTermsFromRequests(approved);
+
+                const approvedTerms = rows
+                    .map((item) => ({
+                        academicYear: String(item?.academic_year_label || "").trim(),
+                        semester: String(item?.semester || "").trim(),
+                        status: String(item?.status || "").trim().toLowerCase(),
+                    }))
+                    .filter((item) => item.academicYear && item.semester && APPROVED_REGISTRATION_STATUSES.has(item.status));
+
+                const registrationSnapshots = await Promise.all(
+                    approvedTerms.map(async (term) => {
+                        try {
+                            const snapshot = await getMyRegistration(term.academicYear, term.semester);
+                            return { term, snapshot };
+                        } catch {
+                            return null;
+                        }
+                    })
+                );
+                if (!active) return;
+
+                const fallbackRows = [];
+                registrationSnapshots.forEach((entry) => {
+                    const term = entry?.term;
+                    const selections = Array.isArray(entry?.snapshot?.selections) ? entry.snapshot.selections : [];
+                    if (!term || selections.length === 0) return;
+                    selections.forEach((selection) => {
+                        fallbackRows.push(
+                            normalizeCourse({
+                                studentId,
+                                academicYear: term.academicYear,
+                                semester: term.semester,
+                                code: selection?.course_code || "",
+                                id: selection?.course_code || "",
+                                name: selection?.course_title_ar || selection?.course_code || "",
+                                credits: Number(selection?.credit_hours || 0),
+                                hours: Number(selection?.credit_hours || 0),
+                                status: String(entry?.snapshot?.request?.status || term.status || "registered").toLowerCase(),
+                                section: selection?.section || "",
+                                grade: "",
+                            })
+                        );
+                    });
+                });
+                setFallbackRegistrationRecords(fallbackRows);
             } catch {
-                if (active) setApprovedTermsFromRequests(new Set());
+                if (active) {
+                    setApprovedTermsFromRequests(new Set());
+                    setFallbackRegistrationRecords([]);
+                }
             }
         };
         loadRequestTerms();
@@ -471,7 +543,7 @@ export default function CourseTablePage() {
             active = false;
             document.removeEventListener("visibilitychange", onVis);
         };
-    }, []);
+    }, [studentId]);
 
     const grouped = useMemo(() => {
         const catalog = new Map();
@@ -485,7 +557,7 @@ export default function CourseTablePage() {
 
         const registrationStatusByKey = new Map();
         (Array.isArray(studentRegistrations) ? studentRegistrations : []).forEach((item) => {
-            const sid = String(item?.studentId || "");
+            const sid = normalizeStudentIdentifier(item?.studentId ?? item?.student_id ?? item?.username);
             const code = String(item?.id || item?.code || "").trim();
             const semester = String(item?.semester || "");
             if (!sid || !code || !semester) return;
@@ -493,7 +565,7 @@ export default function CourseTablePage() {
         });
 
         const records = academicRecords
-            .filter((item) => String(item.studentId) === studentId)
+            .filter((item) => studentIdentifiers.has(normalizeStudentIdentifier(item?.studentId ?? item?.student_id ?? item?.username)))
             .map((item) => {
                 const code = String(item.code || item.id || "");
                 const course = catalog.get(code);
@@ -505,7 +577,6 @@ export default function CourseTablePage() {
                     courseMeta: course || null,
                 };
             })
-            .filter((item) => catalog.has(String(item.code || "")))
             .filter((item) => {
                 const recordStatus = String(item?.status || "").toLowerCase();
                 if (recordStatus === "graded") return true;
@@ -518,14 +589,33 @@ export default function CourseTablePage() {
                 ) {
                     return true;
                 }
-                const key = `${String(item?.studentId || "")}__${String(item?.code || "").trim()}__${String(item?.semester || "")}`;
+                const key = `${normalizeStudentIdentifier(item?.studentId ?? item?.student_id ?? item?.username)}__${String(item?.code || "").trim()}__${String(item?.semester || "")}`;
                 const registrationStatus = registrationStatusByKey.get(key);
                 if (!registrationStatus) return false;
                 return APPROVED_REGISTRATION_STATUSES.has(registrationStatus);
             });
+        const recordsMap = new Map();
+        records.forEach((record) => recordsMap.set(recordKey(record), record));
+
+        (Array.isArray(fallbackRegistrationRecords) ? fallbackRegistrationRecords : []).forEach((item) => {
+            const code = String(item?.code || item?.id || "");
+            const course = catalog.get(code);
+            const normalizedRecord = {
+                ...item,
+                studentId,
+                code,
+                name: course?.name || item?.name || item?.course_title_ar || code,
+                credits: course?.credits || item?.credits || item?.hours || 0,
+                courseMeta: course || null,
+            };
+            const key = recordKey(normalizedRecord);
+            if (!recordsMap.has(key)) {
+                recordsMap.set(key, normalizedRecord);
+            }
+        });
         const map = new Map();
 
-        records.forEach((record) => {
+        [...recordsMap.values()].forEach((record) => {
             const semesterLabel = semesterNames?.[record.semester] || record.semester || "-";
             const academicYear = record.academicYear || t("course_table_not_set");
             const key = `${academicYear}__${record.semester}`;
@@ -556,18 +646,18 @@ export default function CourseTablePage() {
             const semB = normalizeSemesterValue(b.semester || "", "");
             return (semesterRank[semB] || 0) - (semesterRank[semA] || 0);
         });
-    }, [academicRecords, semesterNames, studentId, systemCourses, studentRegistrations, t, approvedTermsFromRequests]);
+    }, [academicRecords, semesterNames, studentId, studentIdentifiers, systemCourses, studentRegistrations, t, approvedTermsFromRequests, fallbackRegistrationRecords]);
 
     const [openKey, setOpenKey] = useState(() => grouped[0]?.key || null);
     const hasApprovedRegistration = useMemo(() => {
         if (approvedTermsFromRequests.size > 0) return true;
         return (Array.isArray(studentRegistrations) ? studentRegistrations : []).some((item) => {
-            const sid = String(item?.studentId || "");
-            if (sid !== studentId) return false;
+            const sid = normalizeStudentIdentifier(item?.studentId ?? item?.student_id ?? item?.username);
+            if (!studentIdentifiers.has(sid)) return false;
             const status = String(item?.status || "").toLowerCase();
             return APPROVED_REGISTRATION_STATUSES.has(status);
         });
-    }, [studentId, studentRegistrations, approvedTermsFromRequests]);
+    }, [studentIdentifiers, studentRegistrations, approvedTermsFromRequests]);
 
     const groupedFlatRecords = useMemo(() => grouped.flatMap((group) => group.records), [grouped]);
     const fallbackPassedHours = useMemo(

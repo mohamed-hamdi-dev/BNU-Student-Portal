@@ -5,6 +5,7 @@ import { SystemContext } from "../../context/SystemContext";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getCurrentAcademicYear, normalizeAcademicYearValue, normalizeSemesterValue } from "../../utils/academicData";
+import { listAdvisorRequests } from "../../services/advisorRegistrationApi";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
 const GRADE_AUDIT_LOG_KEY = "grades.audit.log.v1";
@@ -443,11 +444,45 @@ const calculateGpa = (courses) => {
     });
     return totalCredits > 0 ? totalPoints / totalCredits : 0.0;
 };
+const GRADE_SCOPE_SEMESTER_PRIORITY = { autumn: 3, spring: 2, summer: 1 };
+const getBestAvailableGradeScope = (rows = [], preferredAcademicYear = "") => {
+    const grouped = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const academicYear = String(row?.academicYear || "").trim();
+        const semester = normalizeSemesterValue(row?.semester || "", "");
+        if (!academicYear || !semester) return;
+        const key = `${academicYear}__${semester}`;
+        const previous = grouped.get(key) || { academicYear, semester, count: 0, latestAt: 0 };
+        previous.count += 1;
+        previous.latestAt = Math.max(
+            Number(previous.latestAt || 0),
+            new Date(row?.updatedAt || row?.updated_at || row?.createdAt || row?.created_at || 0).getTime() || 0
+        );
+        grouped.set(key, previous);
+    });
+    const entries = Array.from(grouped.values());
+    if (!entries.length) return null;
+    entries.sort((a, b) => {
+        const preferCurrentYear =
+            Number(String(b.academicYear || "") === String(preferredAcademicYear || "")) -
+            Number(String(a.academicYear || "") === String(preferredAcademicYear || ""));
+        if (preferCurrentYear !== 0) return preferCurrentYear;
+        const yearA = Number.parseInt(String(a.academicYear || "").split("-")[0], 10) || 0;
+        const yearB = Number.parseInt(String(b.academicYear || "").split("-")[0], 10) || 0;
+        if (yearB !== yearA) return yearB - yearA;
+        const semesterDiff = (GRADE_SCOPE_SEMESTER_PRIORITY[b.semester] || 0) - (GRADE_SCOPE_SEMESTER_PRIORITY[a.semester] || 0);
+        if (semesterDiff !== 0) return semesterDiff;
+        if (b.count !== a.count) return b.count - a.count;
+        return Number(b.latestAt || 0) - Number(a.latestAt || 0);
+    });
+    return entries[0] || null;
+};
 
 export default function AdminDashboard() {
     const { academicRecords, mergeGradeRecords, updateAcademicRecord, setAcademicRecords, courses, openSemesters, semesterNames, registrationSettings, gradePublishMap: publishMap, setGradePublishMap: setPublishMap } = useContext(SystemContext);
     const { t } = useTranslation("admin");
     const [allData, setAllData] = useState([]);
+    const [registrationSeedRows, setRegistrationSeedRows] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [isUploading, setIsUploading] = useState(false);
     const [isConfirmingImport, setIsConfirmingImport] = useState(false);
@@ -461,6 +496,7 @@ export default function AdminDashboard() {
     const [pendingImport, setPendingImport] = useState(null);
     const [auditLog, setAuditLog] = useState(() => parseSafe(localStorage.getItem(GRADE_AUDIT_LOG_KEY) || "[]", []));
     const [snapshots, setSnapshots] = useState(() => parseSafe(localStorage.getItem(GRADE_SNAPSHOTS_KEY) || "[]", []));
+    const autoScopedGradeConfigRef = React.useRef(false);
 
     const [gradeConfig, setGradeConfig] = useState(() => {
         const firstOpenSemester = Object.entries(openSemesters || {}).find(([, isOpen]) => Boolean(isOpen))?.[0] || "autumn";
@@ -496,6 +532,84 @@ export default function AdminDashboard() {
     useEffect(() => {
         setAllData(Array.isArray(academicRecords) ? academicRecords : []);
     }, [academicRecords]);
+
+    useEffect(() => {
+        let active = true;
+        const loadRegistrationSeeds = async () => {
+            try {
+                const res = await listAdvisorRequests({});
+                if (!active) return;
+                const rows = Array.isArray(res?.items) ? res.items : [];
+                const next = [];
+                rows.forEach((request) => {
+                    const status = String(request?.status || "").trim().toLowerCase();
+                    if (!APPROVED_REGISTRATION_STATUSES.has(status)) return;
+                    const academicYear = String(request?.academic_year_label || "").trim();
+                    const semester = normalizeSemesterValue(request?.semester || "", "");
+                    const studentId = String(request?.student_code || request?.student_username || request?.student_user_id || "").trim();
+                    const studentName = String(request?.student_full_name || request?.student_username || "").trim();
+                    const username = String(request?.student_username || "").trim();
+                    const offerings = Array.isArray(request?.selected_offerings) ? request.selected_offerings : [];
+                    offerings.forEach((item) => {
+                        next.push({
+                            studentId,
+                            username,
+                            studentName,
+                            code: String(item?.course_code || "").trim(),
+                            name: String(item?.course_title_ar || item?.course_code || "").trim(),
+                            credits: Number(item?.credit_hours || 0),
+                            academicYear,
+                            semester,
+                            semesterName: semesterNames?.[semester] || semester,
+                            section: String(item?.section || "").trim(),
+                            status,
+                            mid1: "",
+                            mid2: "",
+                            yearWork: "",
+                            final: "",
+                            total: "",
+                            grade: "",
+                        });
+                    });
+                });
+                setRegistrationSeedRows(next);
+            } catch {
+                if (active) setRegistrationSeedRows([]);
+            }
+        };
+        loadRegistrationSeeds();
+        return () => {
+            active = false;
+        };
+    }, [semesterNames]);
+
+    useEffect(() => {
+        if (autoScopedGradeConfigRef.current) return;
+        const preferredScope = getBestAvailableGradeScope(allData, getCurrentAcademicYear());
+        if (!preferredScope) return;
+        autoScopedGradeConfigRef.current = true;
+        setGradeConfig((prev) => {
+            const sameAcademicYear = String(prev.academicYear || "") === String(preferredScope.academicYear || "");
+            const sameSemester = normalizeSemesterValue(prev.semester || "", "") === normalizeSemesterValue(preferredScope.semester || "", "");
+            if (sameAcademicYear && sameSemester) return prev;
+            return {
+                ...prev,
+                academicYear: preferredScope.academicYear,
+                semester: preferredScope.semester,
+            };
+        });
+    }, [allData]);
+
+    const gradeSourceData = useMemo(() => {
+        const map = new Map();
+        (Array.isArray(registrationSeedRows) ? registrationSeedRows : []).forEach((item) => {
+            map.set(getRowStorageKey(item), item);
+        });
+        (Array.isArray(allData) ? allData : []).forEach((item) => {
+            map.set(getRowStorageKey(item), item);
+        });
+        return Array.from(map.values());
+    }, [allData, registrationSeedRows]);
 
     useEffect(() => {
         if (!uploadStatus) return undefined;
@@ -576,7 +690,7 @@ export default function AdminDashboard() {
             appendName(sid, u.full_name, u.name, u.displayName, u.display_name, u.universityName);
             appendName(fallbackSid, u.full_name, u.name, u.displayName, u.display_name, u.universityName);
         });
-        allData.forEach((row) => {
+        gradeSourceData.forEach((row) => {
             appendName(row.studentId, row.studentName);
             appendName(row.username, row.studentName);
         });
@@ -586,7 +700,7 @@ export default function AdminDashboard() {
             result.set(sid, pickPreferredDisplayName(names));
         });
         return result;
-    }, [usersList, allData]);
+    }, [usersList, gradeSourceData]);
 
     const coursesLookup = useMemo(() => {
         const map = new Map();
@@ -822,7 +936,7 @@ export default function AdminDashboard() {
 
     const displayData = useMemo(
         () =>
-            allData
+            gradeSourceData
                 .map((row) => {
                     const byUsername = usersLookup.get(`username:${String(row.username || "")}`);
                     const byStudentId = usersLookup.get(`studentId:${normalizeStudentId(row.studentId || "")}`);
@@ -844,7 +958,7 @@ export default function AdminDashboard() {
                 })
                 .filter((row) => String(row.role || "").toLowerCase() !== "admin")
                 .filter((row) => isRowEligibleForGradesView(row)),
-        [allData, usersLookup, officialNameByStudentId, usersLoaded, usersLoadFailed]
+        [gradeSourceData, usersLookup, officialNameByStudentId, usersLoaded, usersLoadFailed]
     );
 
     const filteredData = useMemo(() => {
@@ -1036,14 +1150,14 @@ export default function AdminDashboard() {
                     if (seen.has(duplicateKey)) duplicates.add(duplicateKey);
                     seen.add(duplicateKey);
 
-                    const hasRecord = allData.some(
+                    const hasRecord = gradeSourceData.some(
                         (item) =>
                             String(item.studentId || "") === studentId &&
                             normalizeCourseCode(item.code || "") === courseCode &&
                             normalizeSemesterValue(item.semester || "", "") === gradeConfig.semester &&
                             String(item.academicYear || "") === gradeConfig.academicYear
                     );
-                    const hasStudentInScope = allData.some(
+                    const hasStudentInScope = gradeSourceData.some(
                         (item) =>
                             String(item.studentId || "") === studentId &&
                             normalizeSemesterValue(item.semester || "", "") === gradeConfig.semester &&
@@ -1118,7 +1232,7 @@ export default function AdminDashboard() {
         pushSnapshot("before_confirm_import");
 
         try {
-            const existingMap = new Map(allData.map((item) => [getRowStorageKey(item), item]));
+            const existingMap = new Map(gradeSourceData.map((item) => [getRowStorageKey(item), item]));
             const gradeApiEntries = [];
             const updates = pendingImport.validRows.map((row) => {
                 const key = getRowStorageKey({ studentId: row.studentId, code: row.courseCode, semester: row.semester, academicYear: row.academicYear });
@@ -1196,7 +1310,7 @@ export default function AdminDashboard() {
     const buildTemplateRows = () => {
         const scopedRows = filteredData.length
             ? filteredData
-            : allData.filter((item) => {
+            : gradeSourceData.filter((item) => {
                   const sameAcademicYear = String(item.academicYear || "") === String(gradeConfig.academicYear || "");
                   const sameSemester = normalizeSemesterValue(item.semester || "", "") === normalizeSemesterValue(gradeConfig.semester || "", "");
                   const sameCourse = !gradeConfig.courseCode || normalizeCourseCode(item.code || "") === normalizeCourseCode(gradeConfig.courseCode || "");
@@ -1289,7 +1403,7 @@ export default function AdminDashboard() {
             final: toNum(editForm.final, 0),
             componentScores: editForm.componentScores && typeof editForm.componentScores === "object" ? { ...editForm.componentScores } : {},
         };
-        const originalRow = allData.find((item) => getRowKey(item) === editingIndex) || null;
+        const originalRow = gradeSourceData.find((item) => getRowKey(item) === editingIndex) || null;
         const scoreChanged = effectiveComponents.some((component) => {
             const nextScore = toNum(getComponentValue(normalized, component), 0);
             const previousScore = toNum(getComponentValue(originalRow || {}, component), 0);
