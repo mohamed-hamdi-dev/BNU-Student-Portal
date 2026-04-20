@@ -341,7 +341,6 @@
     "course_table_subtitle": "عرض المقررات المسجلة والدرجات حسب السنة والفصل الدراسي",
     "course_table_hours": "الساعات",
     "course_table_passed_hours": "الساعات التراكمية المجتازة",
-    "course_table_term_hours": "ساعات الترم",
     "course_table_no_data": "لا توجد سجلات أكاديمية حتى الآن.",
     "quiz_welcome_greeting": "أهلاً بك، {{name}} 👋",
     "quiz_welcome_message": "لديك اليوم {{count}} اختبارات مجدولة. تأكد من استقرار الإنترنت قبل البدء.",
