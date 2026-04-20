@@ -576,23 +576,6 @@ export default function CourseTablePage() {
                     credits: course?.credits || item.credits,
                     courseMeta: course || null,
                 };
-            })
-            .filter((item) => {
-                const recordStatus = String(item?.status || "").toLowerCase();
-                if (recordStatus === "graded") return true;
-                const termKey = `${String(item?.academicYear || "").trim()}__${String(item?.semester || "").trim()}`;
-                if (approvedTermsFromRequests.has(termKey)) return true;
-                const semesterOnlyKey = String(item?.semester || "").trim();
-                if (
-                    semesterOnlyKey &&
-                    Array.from(approvedTermsFromRequests).some((k) => String(k || "").split("__")[1] === semesterOnlyKey)
-                ) {
-                    return true;
-                }
-                const key = `${normalizeStudentIdentifier(item?.studentId ?? item?.student_id ?? item?.username)}__${String(item?.code || "").trim()}__${String(item?.semester || "")}`;
-                const registrationStatus = registrationStatusByKey.get(key);
-                if (!registrationStatus) return false;
-                return APPROVED_REGISTRATION_STATUSES.has(registrationStatus);
             });
         const recordsMap = new Map();
         records.forEach((record) => recordsMap.set(recordKey(record), record));
@@ -649,7 +632,18 @@ export default function CourseTablePage() {
     }, [academicRecords, semesterNames, studentId, studentIdentifiers, systemCourses, studentRegistrations, t, approvedTermsFromRequests, fallbackRegistrationRecords]);
 
     const [openKey, setOpenKey] = useState(() => grouped[0]?.key || null);
+
+    useEffect(() => {
+        const firstKey = grouped[0]?.key || null;
+        if (!firstKey) {
+            setOpenKey(null);
+            return;
+        }
+        setOpenKey((prev) => (prev === firstKey ? prev : firstKey));
+    }, [grouped]);
+
     const hasApprovedRegistration = useMemo(() => {
+        if (grouped.length > 0) return true;
         if (approvedTermsFromRequests.size > 0) return true;
         return (Array.isArray(studentRegistrations) ? studentRegistrations : []).some((item) => {
             const sid = normalizeStudentIdentifier(item?.studentId ?? item?.student_id ?? item?.username);
@@ -657,7 +651,7 @@ export default function CourseTablePage() {
             const status = String(item?.status || "").toLowerCase();
             return APPROVED_REGISTRATION_STATUSES.has(status);
         });
-    }, [studentIdentifiers, studentRegistrations, approvedTermsFromRequests]);
+    }, [grouped.length, studentIdentifiers, studentRegistrations, approvedTermsFromRequests]);
 
     const groupedFlatRecords = useMemo(() => grouped.flatMap((group) => group.records), [grouped]);
     const fallbackPassedHours = useMemo(
