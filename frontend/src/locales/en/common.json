@@ -341,6 +341,7 @@
   "course_table_subtitle": "View registered courses and grades by year and semester",
   "course_table_hours": "Hours",
   "course_table_passed_hours": "Cumulative Passed Hours",
+  "course_table_term_hours": "Term Hours",
   "course_table_no_data": "No academic records yet.",
   "quiz_welcome_greeting": "Welcome, {{name}} 👋",
   "quiz_welcome_message": "You have today {{count}} scheduled exams. Please ensure your internet connection is stable before starting.",
