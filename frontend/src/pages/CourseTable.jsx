@@ -372,7 +372,6 @@ const SemesterTable = ({ records, publishMap }) => {
 const AccordionItem = ({ item, isOpen, onToggle, publishMap }) => {
     const { t } = useTranslation("global");
     const gpa = calculateSemesterGpa(item.records);
-    const termHours = item.records.reduce((sum, row) => sum + (Number(row?.credits || 0) || 0), 0);
 
     return (
         <div className="mb-5">
@@ -393,10 +392,6 @@ const AccordionItem = ({ item, isOpen, onToggle, publishMap }) => {
                     <div className="text-left">
                         <p className="text-[10px] text-gray-400">{t("course_table_semester_gpa")}</p>
                         <p className="text-lg font-black text-[#05ADCF]">{gpa.toFixed(2)}</p>
-                    </div>
-                    <div className="text-left">
-                        <p className="text-[10px] text-gray-400">{t("course_table_term_hours")}</p>
-                        <p className="text-lg font-black text-slate-700">{termHours}</p>
                     </div>
                     <ChevronDown className={`transition-transform ${isOpen ? "rotate-180 text-[#05ADCF]" : "text-gray-300"}`} size={22} />
                 </div>
@@ -569,32 +564,16 @@ export default function CourseTablePage() {
         });
     }, [studentId, studentRegistrations, approvedTermsFromRequests]);
 
-    const groupedFlatRecords = useMemo(() => grouped.flatMap((group) => group.records), [grouped]);
-    const fallbackPassedHours = useMemo(
-        () =>
-            groupedFlatRecords.reduce((sum, row) => {
-                const grade = String(row?.grade || "").trim().toUpperCase();
-                const credits = Number(row?.credits || 0) || 0;
-                if (!credits) return sum;
-                if (!grade || grade === "F") return sum;
-                return sum + credits;
-            }, 0),
-        [groupedFlatRecords]
-    );
-    const fallbackCumulativeGpa = useMemo(() => calculateSemesterGpa(groupedFlatRecords), [groupedFlatRecords]);
-    const hasUsableServerProfile = useMemo(
-        () => hasServerProfile && (Number(profileStats.gpa || 0) > 0 || Number(profileStats.hours || 0) > 0),
-        [hasServerProfile, profileStats.gpa, profileStats.hours]
-    );
     const totalCredits = useMemo(() => {
-        if (hasUsableServerProfile) return profileStats.hours;
-        return fallbackPassedHours;
-    }, [fallbackPassedHours, hasUsableServerProfile, profileStats.hours]);
+        if (hasServerProfile) return profileStats.hours;
+        return grouped.reduce((acc, group) => acc + group.records.reduce((sum, row) => sum + (parseFloat(row.credits) || 0), 0), 0);
+    }, [hasServerProfile, profileStats.hours, grouped]);
 
     const cumulativeGpa = useMemo(() => {
-        if (hasUsableServerProfile) return profileStats.gpa;
-        return fallbackCumulativeGpa;
-    }, [fallbackCumulativeGpa, hasUsableServerProfile, profileStats.gpa]);
+        if (hasServerProfile) return profileStats.gpa;
+        const flat = grouped.flatMap((group) => group.records);
+        return calculateSemesterGpa(flat);
+    }, [hasServerProfile, profileStats.gpa, grouped]);
 
     return (
         <div className="bg-[#F8FAFC] mt-[4em] sm:mt-[4.5em] font-sans" dir="rtl">
@@ -670,6 +649,7 @@ export default function CourseTablePage() {
         </div>
     );
 }
+
 
 
 

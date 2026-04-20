@@ -6,7 +6,7 @@ import autoTable from "jspdf-autotable";
 import { CoursesContext } from "../context/CoursesContext";
 import { SystemContext } from "../context/SystemContext";
 import { BookOpen, Calendar, CheckCircle, AlertCircle, User, LogOut, Search, Clock, Plus, Monitor, GraduationCap, Trash2, X, Users, MapPin, Filter, Layers, Download, ChevronDown, Loader2 } from "lucide-react";
-import { calculateSemesterGpa, getCurrentAcademicYear, normalizeAcademicYearValue, normalizeCourse, normalizeSemesterValue } from "../utils/academicData";
+import { getCurrentAcademicYear, normalizeAcademicYearValue, normalizeCourse, normalizeSemesterValue } from "../utils/academicData";
 import {
     deleteMyRegistrationSelection,
     getMyRegistration,
@@ -122,7 +122,7 @@ const App = () => {
     const [serverProfileMetrics, setServerProfileMetrics] = useState(null);
 
     const { selectedCourses, setSelectedCourses, addSelectedCourse, removeSelectedCourse } = useContext(CoursesContext);
-    const { registrationOpen, openSemester, years, registrationSettings, getAvailableCoursesForStudent, upsertPreliminaryAcademicRecord, removePreliminaryAcademicRecord, academicRecords = [] } = useContext(SystemContext);
+    const { registrationOpen, openSemester, years, registrationSettings, getAvailableCoursesForStudent, upsertPreliminaryAcademicRecord, removePreliminaryAcademicRecord } = useContext(SystemContext);
 
     const refreshStudentProfileMetrics = useCallback(async () => {
         try {
@@ -174,39 +174,6 @@ const App = () => {
             maxHours: Number(data?.maxHours || 18),
         };
     }, [registrationSettings?.activeAcademicYear, t, serverProfileMetrics]);
-    const fallbackCompletedRecords = useMemo(() => {
-        const studentId = String(studentInfo.id || "").trim();
-        if (!studentId) return [];
-        return (Array.isArray(academicRecords) ? academicRecords : []).filter((record) => {
-            const recordStudentId = String(record?.studentId || record?.student_id || "").trim();
-            if (recordStudentId !== studentId) return false;
-            const grade = String(record?.grade || "").trim().toUpperCase();
-            const status = String(record?.status || "").trim().toLowerCase();
-            return Boolean(grade) || status === "graded" || status === "completed" || status === "مكتمل";
-        });
-    }, [academicRecords, studentInfo.id]);
-    const fallbackCompletedHours = useMemo(
-        () =>
-            fallbackCompletedRecords.reduce((sum, record) => {
-                const grade = String(record?.grade || "").trim().toUpperCase();
-                const credits = Number(record?.credits ?? record?.hours ?? 0) || 0;
-                if (!credits) return sum;
-                if (!grade || grade === "F") return sum;
-                return sum + credits;
-            }, 0),
-        [fallbackCompletedRecords]
-    );
-    const fallbackCumulativeGpa = useMemo(() => calculateSemesterGpa(fallbackCompletedRecords), [fallbackCompletedRecords]);
-    const effectiveCumulativeGpa = useMemo(() => {
-        const serverGpa = Number(studentInfo.gpa || 0);
-        if (serverGpa > 0) return serverGpa;
-        return fallbackCumulativeGpa;
-    }, [fallbackCumulativeGpa, studentInfo.gpa]);
-    const effectiveCompletedHours = useMemo(() => {
-        const serverHours = Number(studentInfo.completedHours || 0);
-        if (serverHours > 0) return serverHours;
-        return fallbackCompletedHours;
-    }, [fallbackCompletedHours, studentInfo.completedHours]);
     const [policyHoursLimit, setPolicyHoursLimit] = useState(null);
 
     useEffect(() => {
@@ -1882,7 +1849,7 @@ const App = () => {
                             <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
                                 <p className="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider">{t("academic_reg_cumulative_gpa")}</p>
                                 <div className="flex items-baseline gap-1">
-                                    <span className="text-3xl font-black text-gray-900">{Number(effectiveCumulativeGpa || 0).toFixed(2)}</span>
+                                    <span className="text-3xl font-black text-gray-900">{Number(studentInfo.gpa || 0).toFixed(2)}</span>
                                     <span className="text-[10px] text-emerald-500 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">{t("academic_reg_excellent")}</span>
                                 </div>
                             </div>
@@ -1890,7 +1857,7 @@ const App = () => {
                                 <div className="relative z-10">
                                     <p className="text-[10px] opacity-80 font-bold mb-1 uppercase tracking-widest">{t("academic_reg_passed_hours")}</p>
                                     <div className="flex justify-between items-end">
-                                        <span className="text-4xl font-black">{Number(effectiveCompletedHours || 0)}</span>
+                                        <span className="text-4xl font-black">{Number(studentInfo.completedHours || 0)}</span>
                                         <span className="text-xs opacity-70 mb-1">{t("academic_reg_current_term_registered_hours", { hours: totalRegisteredHours })}</span>
                                     </div>
                                     <div className="h-1.5 bg-white/20 rounded-full mt-4 overflow-hidden">
@@ -2558,3 +2525,4 @@ const App = () => {
 };
 
 export default App;
+
