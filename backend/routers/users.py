@@ -15,10 +15,10 @@ from typing import List
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, inspect, or_
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
@@ -64,6 +64,30 @@ COLLEGE_NUMERIC_CODES = {
 
 def ensure_users_schema(db: Session) -> None:
     """Schema is managed centrally by ORM metadata creation."""
+    return None
+
+
+def ensure_user_profile_photos_schema(db: Session) -> None:
+    bind = db.get_bind()
+    if bind is None:
+        return None
+
+    inspector = inspect(bind)
+    try:
+        existing = {col["name"] for col in inspector.get_columns("user_profile_photos")}
+    except Exception:
+        return None
+
+    if "file_bytes" in existing:
+        return None
+
+    dialect = str(bind.dialect.name or "").lower()
+    ddl = "BYTEA" if dialect == "postgresql" else "BLOB"
+    try:
+        db.execute(text(f"ALTER TABLE user_profile_photos ADD COLUMN file_bytes {ddl}"))
+        db.commit()
+    except Exception:
+        db.rollback()
     return None
 
 
@@ -687,6 +711,7 @@ async def upload_my_profile_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    ensure_user_profile_photos_schema(db)
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required")
     ext = Path(file.filename).suffix.lower()
@@ -711,6 +736,7 @@ async def upload_my_profile_photo(
         original_name=Path(file.filename).name,
         mime_type=file.content_type or "application/octet-stream",
         size_bytes=len(content),
+        file_bytes=content,
         status="pending_review" if is_student else "approved",
         rejection_reason=None,
         reviewed_by=None if is_student else current_user.id,
@@ -727,6 +753,7 @@ async def get_my_profile_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    ensure_user_profile_photos_schema(db)
     pending = (
         db.query(UserProfilePhoto)
         .filter(UserProfilePhoto.user_id == current_user.id, UserProfilePhoto.status == "pending_review")
@@ -756,6 +783,7 @@ async def get_my_approved_profile_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    ensure_user_profile_photos_schema(db)
     latest_approved = (
         db.query(UserProfilePhoto)
         .filter(
@@ -773,12 +801,22 @@ async def get_my_approved_profile_photo(
 @router.get("/profile-photo-files/{stored_name}")
 async def serve_profile_photo_file(
     stored_name: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_for_photo_access),
 ):
+    ensure_user_profile_photos_schema(db)
     file_path = (PROFILE_PHOTOS_DIR / Path(stored_name).name).resolve()
-    if not file_path.exists() or not str(file_path).startswith(str(PROFILE_PHOTOS_DIR.resolve())):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path=file_path, filename=file_path.name)
+    if file_path.exists() and str(file_path).startswith(str(PROFILE_PHOTOS_DIR.resolve())):
+        return FileResponse(path=file_path, filename=file_path.name)
+
+    row = db.query(UserProfilePhoto).filter(UserProfilePhoto.stored_name == Path(stored_name).name).first()
+    if row and row.file_bytes:
+        return Response(
+            content=bytes(row.file_bytes),
+            media_type=str(row.mime_type or "application/octet-stream"),
+            headers={"Content-Disposition": f'inline; filename="{Path(stored_name).name}"'},
+        )
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 @router.get("/profile-photos/pending", response_model=List[UserProfilePhotoResponse], dependencies=[Depends(require_role("admin"))])
