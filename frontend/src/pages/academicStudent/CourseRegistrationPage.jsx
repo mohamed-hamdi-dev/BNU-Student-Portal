@@ -7,7 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { getCurrentAcademicYear, normalizeAcademicYearValue, normalizeCourse } from "../../utils/academicData.js";
 import { resolveCollegePolicyForStudent } from "../../utils/collegePolicy.js";
 import { getMyRegistrationCreditPolicy } from "../../services/registrationPolicyApi.js";
-import { getCurrentRegistrationPeriodStatus, getMyRegistration, listMyAdvisorRequests, listMyAvailableOfferings } from "../../services/advisorRegistrationApi.js";
+import { getCurrentRegistrationPeriodStatus, getMyRegistration, listMyAdvisorRequests } from "../../services/advisorRegistrationApi.js";
 import { getMyPaymentOverview } from "../../services/paymentApi.js";
 
 const getCollegeKey = (student = {}) =>
@@ -115,8 +115,6 @@ export default function CourseRegistrationPage() {
   const [paymentUnlocked, setPaymentUnlocked] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(true);
   const [paymentDueAmount, setPaymentDueAmount] = useState(0);
-  const [availableOfferings, setAvailableOfferings] = useState([]);
-  const [availableOfferingsLoaded, setAvailableOfferingsLoaded] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem("loggedUser") || "{}");
@@ -262,33 +260,6 @@ export default function CourseRegistrationPage() {
 
   useEffect(() => {
     let active = true;
-    const loadAvailableOfferings = async () => {
-      try {
-        if (!openSemester) {
-          if (active) {
-            setAvailableOfferings([]);
-            setAvailableOfferingsLoaded(false);
-          }
-          return;
-        }
-        const res = await listMyAvailableOfferings(String(academicYearLabel || ""), openSemester);
-        if (!active) return;
-        setAvailableOfferings(Array.isArray(res?.items) ? res.items : []);
-        setAvailableOfferingsLoaded(true);
-      } catch {
-        if (!active) return;
-        setAvailableOfferings([]);
-        setAvailableOfferingsLoaded(false);
-      }
-    };
-    loadAvailableOfferings();
-    return () => {
-      active = false;
-    };
-  }, [academicYearLabel, openSemester]);
-
-  useEffect(() => {
-    let active = true;
     const loadTermStatus = async () => {
       try {
         if (!openSemester) return;
@@ -377,72 +348,13 @@ export default function CourseRegistrationPage() {
   );
 
   const availableCourses = useMemo(
-    () => {
-      if (!availableOfferingsLoaded) {
-        return getAvailableCoursesForStudent({
-          ...studentInfo,
-          collegeId: studentInfo.collegeId || getCollegeKey(studentInfo),
-          trackId: selectedTrack || studentInfo.trackId || "",
-        }).map((course) => normalizeCourse(course));
-      }
-
-      const statusRank = { allowed: 0, advisor_required: 1, admin_override: 2, blocked: 3 };
-      const grouped = new Map();
-      (Array.isArray(availableOfferings) ? availableOfferings : []).forEach((item) => {
-        const courseCode = String(item?.course_code || item?.course_id || "").trim().toUpperCase();
-        if (!courseCode) return;
-        const status = String(item?.eligibility_status || "blocked").trim().toLowerCase();
-        const groupItem = {
-          id: String(item?.section || item?.offering_id || ""),
-          name: String(item?.section || "-"),
-          section: String(item?.section || ""),
-          day: String(item?.day_of_week || ""),
-          time: `${String(item?.start_time || "")} - ${String(item?.end_time || "")}`.trim(),
-          hall: String(item?.room_name || ""),
-          capacity: Number(item?.available_seats ?? item?.capacity ?? 0),
-          full: !Boolean(item?.is_open),
-          offering_id: Number(item?.offering_id || 0) || undefined,
-          offeringId: Number(item?.offering_id || 0) || undefined,
-          eligibility_status: status,
-          eligibility_reasons: Array.isArray(item?.eligibility_reasons) ? item.eligibility_reasons : [],
-          eligibility_warnings: Array.isArray(item?.eligibility_warnings) ? item.eligibility_warnings : [],
-        };
-        if (!grouped.has(courseCode)) {
-          grouped.set(courseCode, {
-            id: courseCode,
-            code: courseCode,
-            name: String(item?.course_title_ar || item?.course_code || courseCode),
-            hours: Number(item?.credit_hours || 0),
-            credits: Number(item?.credit_hours || 0),
-            year: item?.study_year ?? "",
-            lecture: {
-              day: String(item?.day_of_week || ""),
-              time: `${String(item?.start_time || "")} - ${String(item?.end_time || "")}`.trim(),
-              hall: String(item?.room_name || ""),
-              start: String(item?.start_time || ""),
-              end: String(item?.end_time || ""),
-            },
-            groups: [],
-            eligibility_status: status,
-            eligibility_reasons: Array.isArray(item?.eligibility_reasons) ? item.eligibility_reasons : [],
-            eligibility_warnings: Array.isArray(item?.eligibility_warnings) ? item.eligibility_warnings : [],
-            status: status === "blocked" ? "locked" : "open",
-          });
-        }
-        const current = grouped.get(courseCode);
-        current.groups.push(groupItem);
-        const currentRank = statusRank[String(current.eligibility_status || "blocked").toLowerCase()] ?? 99;
-        const nextRank = statusRank[status] ?? 99;
-        if (nextRank < currentRank) {
-          current.eligibility_status = status;
-          current.eligibility_reasons = Array.isArray(item?.eligibility_reasons) ? item.eligibility_reasons : [];
-          current.eligibility_warnings = Array.isArray(item?.eligibility_warnings) ? item.eligibility_warnings : [];
-          current.status = status === "blocked" ? "locked" : "open";
-        }
-      });
-      return Array.from(grouped.values()).map((course) => normalizeCourse(course));
-    },
-    [availableOfferings, availableOfferingsLoaded, getAvailableCoursesForStudent, selectedTrack, studentInfo]
+    () =>
+      getAvailableCoursesForStudent({
+        ...studentInfo,
+        collegeId: studentInfo.collegeId || getCollegeKey(studentInfo),
+        trackId: selectedTrack || studentInfo.trackId || "",
+      }).map((course) => normalizeCourse(course)),
+    [getAvailableCoursesForStudent, selectedTrack, studentInfo]
   );
 
   const filteredCourses = useMemo(() => {
@@ -455,37 +367,6 @@ export default function CourseRegistrationPage() {
     });
   }, [availableCourses, searchQuery, selectedYear]);
 
-  const getEligibilityBadgeMeta = (status) => {
-    const normalized = String(status || "blocked").trim().toLowerCase();
-    if (normalized === "allowed") {
-      return { label: "Allowed", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-    }
-    if (normalized === "advisor_required") {
-      return { label: "Advisor Required", classes: "bg-amber-50 text-amber-700 border-amber-200" };
-    }
-    if (normalized === "admin_override") {
-      return { label: "Admin Override", classes: "bg-purple-50 text-purple-700 border-purple-200" };
-    }
-    return { label: "Blocked", classes: "bg-rose-50 text-rose-700 border-rose-200" };
-  };
-
-  const getSelectedCourseBadgeMeta = (status) => {
-    const normalized = String(status || "").trim().toLowerCase();
-    if (["registered", "approved", "locked", "advisor_approved", "admin_override_approved"].includes(normalized)) {
-      return { label: "Registered", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-    }
-    if (normalized === "admin_override_pending") {
-      return { label: "Admin Override", classes: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200" };
-    }
-    if (["pending_advisor", "advisor_requested", "draft", "need_info"].includes(normalized)) {
-      return { label: "Pending Advisor", classes: "bg-amber-50 text-amber-700 border-amber-200" };
-    }
-    if (normalized === "advisor_rejected" || normalized === "admin_override_rejected") {
-      return { label: "Rejected", classes: "bg-rose-50 text-rose-700 border-rose-200" };
-    }
-    return null;
-  };
-
   useEffect(() => {
     let active = true;
     const hydrateRegisteredFromBackend = async () => {
@@ -497,7 +378,7 @@ export default function CourseRegistrationPage() {
         const requestStatus = String(res?.request?.status || "").trim().toLowerCase();
         const selections = Array.isArray(res?.selections) ? res.selections : [];
         if (!selections.length) return;
-        const canHydrate = ["advisor_requested", "advisor_approved", "registered", "approved", "locked", "need_info", "admin_override_pending", "admin_override_approved"].includes(requestStatus);
+        const canHydrate = ["advisor_requested", "advisor_approved", "registered", "approved", "locked", "need_info"].includes(requestStatus);
         if (!canHydrate) return;
 
         const byCode = new Map();
@@ -601,8 +482,9 @@ export default function CourseRegistrationPage() {
     const hoursAfterAdd = registeredHours + Number(course.hours || 0);
     if (registrationSettings.enforceMaxHours && hoursAfterAdd > effectiveMaxHours) {
       alert("لا يمكن إضافة المادة لأنك ستتجاوز الحد الأقصى للساعات المسموح بها.");
+      return;
     }
-    if (group?.full || String(group?.eligibility_status || course?.eligibility_status || "").trim().toLowerCase() === "blocked") {
+    if (group?.full) {
       alert("هذه المجموعة ممتلئة ولا توجد أماكن شاغرة.");
       return;
     }
@@ -753,31 +635,12 @@ export default function CourseRegistrationPage() {
             const isRegistered = selectedCourses.some(
               (c) => c.id === course.id && c.semester === openSemester
             );
-            const selectedCourse = selectedCourses.find(
-              (c) => c.id === course.id && c.semester === openSemester
-            );
             const blockedByMaxHours = registrationSettings.enforceMaxHours && (registeredHours + Number(course.hours || 0)) > effectiveMaxHours;
-            const selectionBadgeMeta = isRegistered ? getSelectedCourseBadgeMeta(selectedCourse?.status) : null;
-            const eligibilityMeta = selectionBadgeMeta || getEligibilityBadgeMeta(course?.eligibility_status);
-            const eligibilityTitle = [
-              ...(Array.isArray(course?.eligibility_reasons) ? course.eligibility_reasons : []),
-              ...(Array.isArray(course?.eligibility_warnings) ? course.eligibility_warnings : []),
-            ]
-              .filter(Boolean)
-              .join(" | ");
-            const displayTitle = isRegistered
-              ? selectionBadgeMeta?.label || ""
-              : eligibilityTitle || eligibilityMeta.label;
             return (
               <div key={course.id} className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-black text-gray-800">{course.name}</h3>
-                      <span title={displayTitle} className={`rounded-full border px-2 py-1 text-[10px] font-black ${eligibilityMeta.classes}`}>
-                        {eligibilityMeta.label}
-                      </span>
-                    </div>
+                    <h3 className="text-lg font-black text-gray-800">{course.name}</h3>
                     <p className="text-xs text-gray-500">{course.id} - السنة {course.year}</p>
                   </div>
                   <span className="rounded-full bg-gray-50 px-3 py-1 text-xs font-bold text-gray-600">
@@ -801,19 +664,14 @@ export default function CourseRegistrationPage() {
                       <AlertCircle size={14} /> لا يمكن إضافة المادة لأنها ستتجاوز الحد الأقصى للساعات.
                     </div>
                   )}
-                  {!isRegistered && eligibilityTitle && (
-                    <div className="flex items-start gap-1 text-amber-700">
-                      <AlertCircle size={14} className="mt-0.5" /> {eligibilityTitle}
-                    </div>
-                  )}
                 </div>
                 <button
-                  disabled={!canRegisterNow || isRegistered || isTermLockedByAdvisorFlow || String(course?.eligibility_status || "").trim().toLowerCase() === "blocked"}
+                  disabled={!canRegisterNow || isRegistered || blockedByMaxHours || isTermLockedByAdvisorFlow}
                   onClick={() => setSelectedCourseForGroups(course)}
                   className={`mt-4 w-full rounded-2xl px-4 py-3 text-xs font-black transition-all ${
                     isRegistered
                       ? "bg-emerald-500 text-white"
-                      : canRegisterNow && !isTermLockedByAdvisorFlow && String(course?.eligibility_status || "").trim().toLowerCase() !== "blocked"
+                      : canRegisterNow && !isTermLockedByAdvisorFlow
                       ? "bg-slate-900 text-white hover:bg-black"
                       : "bg-gray-100 text-gray-400"
                   }`}
@@ -885,21 +743,11 @@ export default function CourseRegistrationPage() {
                   }
 
                   const isFull = Boolean(group?.full);
-                  const isEligibilityBlocked = String(group?.eligibility_status || selectedCourseForGroups?.eligibility_status || "").trim().toLowerCase() === "blocked";
-                  const isBlocked = isFull || Boolean(conflictCourseName) || isEligibilityBlocked;
-                  const groupMeta = getEligibilityBadgeMeta(group?.eligibility_status || selectedCourseForGroups?.eligibility_status);
-                  const backendReason = [
-                    ...(Array.isArray(group?.eligibility_reasons) ? group.eligibility_reasons : []),
-                    ...(Array.isArray(group?.eligibility_warnings) ? group.eligibility_warnings : []),
-                  ]
-                    .filter(Boolean)
-                    .join(" | ");
+                  const isBlocked = isFull || Boolean(conflictCourseName);
                   const blockReason = isFull
                     ? "مغلقة (المجموعة ممتلئة)"
                     : conflictCourseName
                     ? `يوجد تعارض مع المادة ${conflictCourseName}`
-                    : backendReason
-                    ? backendReason
                     : "";
 
                   return (
@@ -913,10 +761,7 @@ export default function CourseRegistrationPage() {
                           : "border-gray-100 hover:border-[#05ADCF]"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <div className="font-bold text-gray-800">{group.name}</div>
-                        <span className={`rounded-full border px-2 py-1 text-[10px] font-black ${groupMeta.classes}`}>{groupMeta.label}</span>
-                      </div>
+                      <div className="font-bold text-gray-800">{group.name}</div>
                       <div className="text-xs text-gray-500">
                         {group.day} - {group.time} - {group.hall}
                       </div>

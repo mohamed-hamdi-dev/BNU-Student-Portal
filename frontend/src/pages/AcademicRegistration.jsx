@@ -274,79 +274,7 @@ const App = () => {
     const normalizedOpenSemester = useMemo(() => normalizeSemesterValue(openSemester, ""), [openSemester]);
     const isCurrentSemester = (semesterValue) => normalizeSemesterValue(semesterValue, "") === normalizedOpenSemester;
     const academicYears = useMemo(() => [{ id: "all", name: t("academic_reg_all_years") }, ...(years || []).map((y) => ({ id: y.id, name: y.name }))], [t, years]);
-    const courses = useMemo(() => {
-        if (!availableOfferingsLoaded) {
-            return getAvailableCoursesForStudent(studentInfo).map((course) => normalizeCourse(course));
-        }
-
-        const statusRank = {
-            allowed: 0,
-            advisor_required: 1,
-            admin_override: 2,
-            blocked: 3,
-        };
-        const grouped = new Map();
-        (Array.isArray(availableOfferings) ? availableOfferings : []).forEach((item) => {
-            const courseCode = String(item?.course_code || item?.course_id || "").trim().toUpperCase();
-            if (!courseCode) return;
-            const status = String(item?.eligibility_status || "blocked").trim().toLowerCase();
-            const groupItem = {
-                id: String(item?.section || item?.offering_id || ""),
-                name: String(item?.section || "-"),
-                section: String(item?.section || ""),
-                day: String(item?.day_of_week || ""),
-                time: `${String(item?.start_time || "")} - ${String(item?.end_time || "")}`.trim(),
-                hall: String(item?.room_name || ""),
-                capacity: Number(item?.available_seats ?? item?.capacity ?? 0),
-                full: !Boolean(item?.is_open),
-                offering_id: Number(item?.offering_id || 0) || undefined,
-                offeringId: Number(item?.offering_id || 0) || undefined,
-                eligibility_status: status,
-                eligibility_reasons: Array.isArray(item?.eligibility_reasons) ? item.eligibility_reasons : [],
-                eligibility_warnings: Array.isArray(item?.eligibility_warnings) ? item.eligibility_warnings : [],
-            };
-            if (!grouped.has(courseCode)) {
-                grouped.set(courseCode, {
-                    id: courseCode,
-                    code: courseCode,
-                    name: String(item?.course_title_ar || item?.course_code || courseCode),
-                    hours: Number(item?.credit_hours || 0),
-                    credits: Number(item?.credit_hours || 0),
-                    year: item?.study_year ?? "",
-                    lecture: {
-                        day: String(item?.day_of_week || ""),
-                        time: `${String(item?.start_time || "")} - ${String(item?.end_time || "")}`.trim(),
-                        hall: String(item?.room_name || ""),
-                        start: String(item?.start_time || ""),
-                        end: String(item?.end_time || ""),
-                    },
-                    groups: [],
-                    eligibility_status: status,
-                    eligibility_reasons: Array.isArray(item?.eligibility_reasons) ? item.eligibility_reasons : [],
-                    eligibility_warnings: Array.isArray(item?.eligibility_warnings) ? item.eligibility_warnings : [],
-                    status: status === "blocked" ? "locked" : "open",
-                });
-            }
-            const current = grouped.get(courseCode);
-            current.groups.push(groupItem);
-            const currentRank = statusRank[String(current.eligibility_status || "blocked").toLowerCase()] ?? 99;
-            const nextRank = statusRank[status] ?? 99;
-            if (nextRank < currentRank) {
-                current.eligibility_status = status;
-                current.eligibility_reasons = Array.isArray(item?.eligibility_reasons) ? item.eligibility_reasons : [];
-                current.eligibility_warnings = Array.isArray(item?.eligibility_warnings) ? item.eligibility_warnings : [];
-                current.status = status === "blocked" ? "locked" : "open";
-                current.lecture = {
-                    day: String(item?.day_of_week || ""),
-                    time: `${String(item?.start_time || "")} - ${String(item?.end_time || "")}`.trim(),
-                    hall: String(item?.room_name || ""),
-                    start: String(item?.start_time || ""),
-                    end: String(item?.end_time || ""),
-                };
-            }
-        });
-        return Array.from(grouped.values()).map((course) => normalizeCourse(course));
-    }, [availableOfferings, availableOfferingsLoaded, getAvailableCoursesForStudent, studentInfo]);
+    const courses = useMemo(() => getAvailableCoursesForStudent(studentInfo).map((course) => normalizeCourse(course)), [getAvailableCoursesForStudent, studentInfo]);
     useEffect(() => {
         let active = true;
         const loadAvailableOfferings = async () => {
@@ -455,10 +383,10 @@ const App = () => {
     }, [normalizedOpenSemester, availableCourseIds, setSelectedCourses]);
 
     const handleRegisterClick = async (course) => {
-        const eligibilityStatus = String(course?.eligibility_status || "").trim().toLowerCase();
-        if (!registrationOpen || course.status === "locked" || eligibilityStatus === "blocked") return;
+        if (!registrationOpen || course.status === "locked") return;
         if (totalRegisteredHours + Number(course.hours || 0) > effectiveMaxHours) {
             showAlert(t("academic_reg_max_hours_exceeded"), "warning");
+            return;
         }
         const normalizeCode = (value) =>
             String(value || "")
@@ -471,7 +399,23 @@ const App = () => {
             return;
         }
         try {
-            const matchedGroups = Array.isArray(course?.groups) ? course.groups : [];
+            const academicYearLabel = String(getCurrentAcademicYear() || "");
+            const available = await listMyAvailableOfferings(academicYearLabel, openSemester);
+            const offerings = Array.isArray(available?.items) ? available.items : [];
+            const matchedGroups = offerings
+                .filter((item) => normalizeCode(item?.course_code) === courseCode)
+                .map((item) => ({
+                    id: String(item?.section || item?.offering_id || ""),
+                    name: String(item?.section || "-"),
+                    section: String(item?.section || ""),
+                    day: String(item?.day_of_week || ""),
+                    time: `${String(item?.start_time || "")} - ${String(item?.end_time || "")}`.trim(),
+                    hall: String(item?.room_name || ""),
+                    capacity: Number(item?.available_seats ?? item?.capacity ?? 0),
+                    full: !Boolean(item?.is_open),
+                    offering_id: Number(item?.offering_id || 0) || undefined,
+                    offeringId: Number(item?.offering_id || 0) || undefined,
+                }));
             if (!matchedGroups.length) {
                 showAlert("لا توجد سكاشن متاحة حاليًا لهذه المادة في هذا الترم.", "warning");
                 return;
@@ -486,8 +430,7 @@ const App = () => {
     };
 
     const confirmRegistration = (course, group) => {
-        const groupEligibility = String(group?.eligibility_status || course?.eligibility_status || "").trim().toLowerCase();
-        if (group.full || groupEligibility === "blocked") return;
+        if (group.full) return;
         const registrationResult = addSelectedCourse({ ...course, selectedGroup: group, semester: openSemester, status: "draft" });
         if (!registrationResult?.ok) {
             showAlert(registrationResult?.error || "تعذر تسجيل المادة المختارة.", "error");
@@ -585,9 +528,6 @@ const App = () => {
         if (!key) return "";
         if (key === "advisor_requested" || key === "submitted") return "تم الإرسال للمرشد";
         if (key === "advisor_approved") return "وافق المرشد";
-        if (key === "admin_override_pending") return "بانتظار الاستثناء الإداري";
-        if (key === "admin_override_approved") return "تمت الموافقة الإدارية";
-        if (key === "admin_override_rejected") return "تم رفض الاستثناء";
         if (key === "registered") return "تم التنفيذ";
         if (key === "approved") return "معتمد";
         if (key === "locked") return "مغلق";
@@ -600,9 +540,6 @@ const App = () => {
     const getTermRequestTone = (status) => {
         const key = normalizeRequestStatus(status);
         if (key === "advisor_requested" || key === "submitted") return "bg-indigo-50 text-indigo-700 border-indigo-200";
-        if (key === "admin_override_pending") return "bg-purple-50 text-purple-700 border-purple-200";
-        if (key === "admin_override_approved") return "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200";
-        if (key === "admin_override_rejected") return "bg-rose-50 text-rose-700 border-rose-200";
         if (key === "advisor_approved") return "bg-cyan-50 text-cyan-700 border-cyan-200";
         if (key === "registered" || key === "approved") return "bg-emerald-50 text-emerald-700 border-emerald-200";
         if (key === "locked") return "bg-slate-100 text-slate-700 border-slate-300";
@@ -611,47 +548,12 @@ const App = () => {
         return "bg-slate-50 text-slate-700 border-slate-200";
     };
 
-    const getEligibilityBadgeMeta = (status) => {
-        const normalized = String(status || "blocked").trim().toLowerCase();
-        if (normalized === "allowed") {
-            return { label: "Allowed", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-        }
-        if (normalized === "advisor_required") {
-            return { label: "Advisor Required", classes: "bg-amber-50 text-amber-700 border-amber-200" };
-        }
-        if (normalized === "admin_override") {
-            return { label: "Admin Override", classes: "bg-purple-50 text-purple-700 border-purple-200" };
-        }
-        return { label: "Blocked", classes: "bg-rose-50 text-rose-700 border-rose-200" };
-    };
-
-    const getSelectedCourseBadgeMeta = (status) => {
-        const normalized = String(status || "").trim().toLowerCase();
-        if (["registered", "approved", "locked", "advisor_approved", "admin_override_approved"].includes(normalized)) {
-            return { label: "Registered", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-        }
-        if (normalized === "admin_override_pending") {
-            return { label: "Admin Override", classes: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200" };
-        }
-        if (["pending_advisor", "advisor_requested", "draft", "need_info"].includes(normalized)) {
-            return { label: "Pending Advisor", classes: "bg-amber-50 text-amber-700 border-amber-200" };
-        }
-        if (normalized === "advisor_rejected" || normalized === "admin_override_rejected") {
-            return { label: "Rejected", classes: "bg-rose-50 text-rose-700 border-rose-200" };
-        }
-        return null;
-    };
-
     const syncCurrentSemesterStatus = (nextStatus) => {
         const normalized = normalizeRequestStatus(nextStatus);
         if (!normalized || !openSemester) return;
         const mapped =
             normalized === "registered" || normalized === "advisor_approved" || normalized === "approved" || normalized === "locked"
                 ? "registered"
-                : normalized === "admin_override_approved"
-                ? "registered"
-                : normalized === "admin_override_pending"
-                ? "pending_advisor"
                 : normalized === "rejected"
                 ? "rejected"
                 : normalized === "need_info"
@@ -868,8 +770,6 @@ const App = () => {
                         semester: normalizedOpenSemester || openSemester,
                         status:
                             requestStatus === "registered" || requestStatus === "approved" || requestStatus === "locked"
-                                ? "registered"
-                                : requestStatus === "admin_override_approved"
                                 ? "registered"
                                 : requestStatus === "advisor_approved"
                                 ? "advisor_approved"
@@ -2126,26 +2026,14 @@ const App = () => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {filteredCourses.map((course) => {
                                         const selectedInCurrentSemester = currentSemesterSelectedCourseIds.has(String(course?.id || course?.code || ""));
-                                        const selectedCourse = getSelectedCourseForCurrentSemester(course.id);
-                                        const selectedCourseStatus = String(selectedCourse?.status || "")
+                                        const selectedCourseStatus = String(getSelectedCourseForCurrentSemester(course.id)?.status || "")
                                             .trim()
                                             .toLowerCase();
-                                        const selectionBadgeMeta = selectedInCurrentSemester ? getSelectedCourseBadgeMeta(selectedCourseStatus) : null;
-                                        const eligibilityMeta = selectionBadgeMeta || getEligibilityBadgeMeta(course?.eligibility_status);
-                                        const eligibilityTitle = [
-                                            ...(Array.isArray(course?.eligibility_reasons) ? course.eligibility_reasons : []),
-                                            ...(Array.isArray(course?.eligibility_warnings) ? course.eligibility_warnings : []),
-                                        ]
-                                            .filter(Boolean)
-                                            .join(" | ");
-                                        const displayTitle = selectedInCurrentSemester
-                                            ? selectionBadgeMeta?.label || ""
-                                            : eligibilityTitle || eligibilityMeta.label;
                                         return (
                                         <div
                                             key={course.id}
                                             className={`bg-white rounded-[2rem] p-5 sm:p-7 border border-gray-100 shadow-sm hover:shadow-xl transition-all relative group ${
-                                                !selectedInCurrentSemester && String(course?.eligibility_status || "").trim().toLowerCase() === "blocked" ? "opacity-80" : ""
+                                                course.status === "locked" ? "opacity-60 grayscale-[0.3]" : ""
                                             }`}>
                                             <div className="flex justify-between mb-5">
                                                 <div>
@@ -2154,11 +2042,6 @@ const App = () => {
                                                             {course.id}
                                                         </span>
                                                         <span className="text-[9px] font-bold text-gray-300 uppercase bg-gray-50 px-2 py-1 rounded-lg">{t("academic_reg_year_label", { year: course.year })}</span>
-                                                        <span
-                                                            title={displayTitle}
-                                                            className={`text-[9px] font-black px-2 py-1 rounded-lg border ${eligibilityMeta.classes}`}>
-                                                            {eligibilityMeta.label}
-                                                        </span>
                                                     </div>
                                                     <h3 className="font-bold text-xl text-gray-800 mt-1 leading-tight group-hover:text-[#05ADCF] transition-colors">{course.name}</h3>
                                                 </div>
@@ -2185,9 +2068,9 @@ const App = () => {
                                                 </div>
                                             </div>
 
-                                            {!selectedInCurrentSemester && eligibilityTitle && (
-                                                <div className="mb-6 text-[10px] text-amber-700 font-bold flex items-start gap-2 bg-amber-50 p-3 rounded-xl border border-amber-100/50">
-                                                    <AlertCircle size={14} className="mt-0.5 shrink-0" /> {eligibilityTitle}
+                                            {course.prereq && (
+                                                <div className="mb-6 text-[10px] text-amber-600 font-bold flex items-center gap-2 bg-amber-50 p-3 rounded-xl border border-amber-100/50">
+                                                    <AlertCircle size={14} /> {t("academic_reg_prereq_required", { prereq: course.prereq })}
                                                 </div>
                                             )}
 
@@ -2196,14 +2079,14 @@ const App = () => {
                                                 disabled={
                                                     !registrationOpen ||
                                                     isSubmitLockedByRequest ||
-                                                    String(course?.eligibility_status || "").trim().toLowerCase() === "blocked" ||
+                                                    course.status === "locked" ||
                                                     selectedInCurrentSemester
                                                 }
                                                 className={`w-full py-4 rounded-2xl font-black text-[11px] uppercase tracking-[0.1em] transition-all flex items-center justify-center gap-2
                           ${
                               selectedInCurrentSemester
                                   ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                                  : isSubmitLockedByRequest || !registrationOpen || String(course?.eligibility_status || "").trim().toLowerCase() === "blocked"
+                                  : isSubmitLockedByRequest || !registrationOpen || course.status === "locked"
                                   ? "bg-gray-100 text-gray-300"
                                   : "bg-gray-900 text-white hover:bg-[#05ADCF] hover:shadow-lg shadow-gray-200"
                           }`}>
@@ -2218,10 +2101,6 @@ const App = () => {
                                                 ) : isSubmitLockedByRequest ? (
                                                     <>
                                                         <CheckCircle size={16} /> {t("academic_reg_locked_after_submit")}
-                                                    </>
-                                                ) : String(course?.eligibility_status || "").trim().toLowerCase() === "blocked" ? (
-                                                    <>
-                                                        <AlertCircle size={16} /> Blocked
                                                     </>
                                                 ) : (
                                                     <>
@@ -2632,40 +2511,20 @@ const App = () => {
                         </div>
                         <div className="p-4 sm:p-8 space-y-4 max-h-[55vh] overflow-y-auto custom-scrollbar">
                             {selectedCourseForGroups.groups.map((group) => (
-                                (() => {
-                                    const groupMeta = getEligibilityBadgeMeta(group?.eligibility_status || selectedCourseForGroups?.eligibility_status);
-                                    const groupReasons = [
-                                        ...(Array.isArray(group?.eligibility_reasons) ? group.eligibility_reasons : []),
-                                        ...(Array.isArray(group?.eligibility_warnings) ? group.eligibility_warnings : []),
-                                    ]
-                                        .filter(Boolean)
-                                        .join(" | ");
-                                    return (
                                 <div
                                     key={group.id}
-                                    onClick={() =>
-                                        !group.full &&
-                                        String(group?.eligibility_status || selectedCourseForGroups?.eligibility_status || "").trim().toLowerCase() !== "blocked" &&
-                                        confirmRegistration(selectedCourseForGroups, group)
-                                    }
+                                    onClick={() => !group.full && confirmRegistration(selectedCourseForGroups, group)}
                                     className={`p-6 rounded-[2rem] border-2 transition-all flex justify-between items-center cursor-pointer group/item
-                        ${group.full || String(group?.eligibility_status || selectedCourseForGroups?.eligibility_status || "").trim().toLowerCase() === "blocked" ? "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed" : "hover:border-[#05ADCF] hover:bg-[#05ADCF]/5 border-gray-100 shadow-sm hover:shadow-md"}`}>
+                        ${group.full ? "bg-gray-50 border-gray-100 opacity-50 cursor-not-allowed" : "hover:border-[#05ADCF] hover:bg-[#05ADCF]/5 border-gray-100 shadow-sm hover:shadow-md"}`}>
                                     <div className="flex items-center gap-4">
                                         <div
                                             className={`p-4 rounded-2xl ${
-                                                group.full || String(group?.eligibility_status || selectedCourseForGroups?.eligibility_status || "").trim().toLowerCase() === "blocked"
-                                                    ? "bg-gray-200"
-                                                    : "bg-[#05ADCF]/10 text-[#05ADCF] group-hover/item:bg-[#05ADCF] group-hover/item:text-white"
+                                                group.full ? "bg-gray-200" : "bg-[#05ADCF]/10 text-[#05ADCF] group-hover/item:bg-[#05ADCF] group-hover/item:text-white"
                                             } transition-all`}>
                                             <Monitor size={24} />
                                         </div>
                                         <div>
-                                            <div className="flex items-center gap-2">
-                                                <p className="font-black text-base text-gray-800">{group.name}</p>
-                                                <span title={groupReasons || groupMeta.label} className={`text-[10px] font-black px-2 py-1 rounded-full border ${groupMeta.classes}`}>
-                                                    {groupMeta.label}
-                                                </span>
-                                            </div>
+                                            <p className="font-black text-base text-gray-800">{group.name}</p>
                                             <div className="flex items-center gap-3 mt-1.5 text-[11px] font-bold text-gray-400">
                                                 <span className="flex items-center gap-1">
                                                     <Calendar size={12} /> {group.day}
@@ -2677,7 +2536,6 @@ const App = () => {
                                                     <MapPin size={12} /> {group.hall}
                                                 </span>
                                             </div>
-                                            {groupReasons && <div className="mt-2 text-[11px] font-bold text-amber-700">{groupReasons}</div>}
                                         </div>
                                     </div>
                                     <div className="text-left">
@@ -2687,8 +2545,6 @@ const App = () => {
                                         </div>
                                     </div>
                                 </div>
-                                    );
-                                })()
                             ))}
                         </div>
                         <div className="p-6 border-t border-gray-50 bg-gray-50/30 flex justify-center ">
