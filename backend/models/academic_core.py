@@ -317,6 +317,24 @@ class CollegeCreditPolicyTier(Base):
     college = relationship("College")
 
 
+class RegistrationEligibilityPolicy(Base):
+    __tablename__ = "ac_registration_eligibility_policy"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    allow_higher_year = Column(Boolean, nullable=False, default=True)
+    max_year_jump = Column(Integer, nullable=False, default=1)
+    min_gpa = Column(Float, nullable=False, default=2.5)
+    min_earned_hours = Column(Integer, nullable=False, default=60)
+    require_advisor_approval_for_higher_year = Column(Boolean, nullable=False, default=True)
+    allow_admin_override = Column(Boolean, nullable=False, default=True)
+    strict_conflict_check = Column(Boolean, nullable=False, default=True)
+    max_credits_normal = Column(Integer, nullable=False, default=18)
+    max_credits_overload = Column(Integer, nullable=False, default=21)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class AssessmentTemplate(Base):
     __tablename__ = "ac_assessment_templates"
 

@@ -1,6 +1,16 @@
 ﻿import React, { useEffect, useState } from "react";
 import { listAdminBankReceipts, reviewAdminBankReceipt } from "../../services/paymentApi";
 
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
+const normalizeApiBase = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("localhost") || value.startsWith("127.0.0.1")) return `http://${value}`;
+  return `https://${value}`;
+};
+const API_BASE = normalizeApiBase(RAW_API_BASE);
+
 export default function AdminBankReceiptsPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -44,8 +54,9 @@ export default function AdminBankReceiptsPage() {
     const value = String(url || "").trim();
     if (!value) return "";
     if (/^https?:\/\//i.test(value)) return value;
-    if (value.startsWith("/")) return `${window.location.origin}${value}`;
-    return `${window.location.origin}/${value}`;
+    if (value.startsWith("/api/")) return `${API_BASE}${value}`;
+    if (value.startsWith("/")) return `${API_BASE}${value}`;
+    return `${API_BASE}/${value}`;
   };
 
   const withAccessToken = (url) => {
@@ -53,8 +64,18 @@ export default function AdminBankReceiptsPage() {
     if (!clean) return "";
     const token = localStorage.getItem("access_token");
     if (!token) return clean;
-    const sep = clean.includes("?") ? "&" : "?";
-    return `${clean}${sep}token=${encodeURIComponent(token)}`;
+    let baseUrl = clean;
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      parsed.searchParams.delete("token");
+      baseUrl = /^https?:\/\//i.test(clean) ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      baseUrl = clean
+        .replace(/([?&])token=[^&#]*(&)?/gi, (_, prefix, suffix) => (prefix === "?" && suffix ? "?" : prefix === "&" && suffix ? "&" : ""))
+        .replace(/[?&]$/, "");
+    }
+    const sep = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${sep}token=${encodeURIComponent(token)}`;
   };
 
   const downloadReceipt = (row) => {

@@ -336,6 +336,38 @@ class RegistrationWindowResponse(BaseModel):
         from_attributes = True
 
 
+class RegistrationEligibilityPolicyUpdate(BaseModel):
+    allow_higher_year: bool | None = None
+    max_year_jump: int | None = Field(default=None, ge=0, le=10)
+    min_gpa: float | None = Field(default=None, ge=0, le=4)
+    min_earned_hours: int | None = Field(default=None, ge=0)
+    require_advisor_approval_for_higher_year: bool | None = None
+    allow_admin_override: bool | None = None
+    strict_conflict_check: bool | None = None
+    max_credits_normal: int | None = Field(default=None, ge=0, le=30)
+    max_credits_overload: int | None = Field(default=None, ge=0, le=30)
+    is_active: bool | None = None
+
+
+class RegistrationEligibilityPolicyResponse(BaseModel):
+    id: int
+    allow_higher_year: bool
+    max_year_jump: int
+    min_gpa: float
+    min_earned_hours: int
+    require_advisor_approval_for_higher_year: bool
+    allow_admin_override: bool
+    strict_conflict_check: bool
+    max_credits_normal: int
+    max_credits_overload: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class RegistrationSubmit(BaseModel):
     academic_year_label: str = Field(..., min_length=7, max_length=30)
     semester: Literal["autumn", "spring", "summer"]
@@ -364,7 +396,20 @@ class AdvisorRegistrationManagePayload(BaseModel):
 
 
 class RegistrationStatusUpdate(BaseModel):
-    status: Literal["draft", "submitted", "advisor_requested", "advisor_approved", "need_info", "rejected", "registered", "locked"]
+    status: Literal[
+        "draft",
+        "submitted",
+        "advisor_requested",
+        "advisor_approved",
+        "advisor_rejected",
+        "need_info",
+        "rejected",
+        "admin_override_pending",
+        "admin_override_approved",
+        "admin_override_rejected",
+        "registered",
+        "locked",
+    ]
 
 
 class RegistrationRequestResponse(BaseModel):
