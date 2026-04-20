@@ -277,17 +277,19 @@ export default function AuthContextProvider({ children }) {
       localStorage.removeItem(SESSION_NOTICE_KEY);
       window.setTimeout(() => {
         Swal.fire({
+          toast: true,
+          position: "top",
+          showConfirmButton: false,
+          timer: 5000,
+          timerProgressBar: true,
+          showCloseButton: true,
           icon: "info",
           title: "انتهت الجلسة",
           text: sessionNotice,
-          confirmButtonText: "تسجيل الدخول",
-          confirmButtonColor: "#05ADCF",
           background: "#0f172a",
           color: "#e5eef5",
-          backdrop: "rgba(2, 6, 23, 0.72)",
           customClass: {
-            popup: "rounded-[1.5rem]",
-            confirmButton: "rounded-xl px-5 py-2 font-bold",
+            popup: "rounded-2xl border border-slate-800 shadow-xl mt-4",
           },
         });
       }, 50);
@@ -372,8 +374,8 @@ export default function AuthContextProvider({ children }) {
     <AuthContext.Provider value={value}>
       {children}
       {showIdleWarning ? (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 px-4" dir="rtl">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 text-right shadow-2xl">
+        <div className="fixed inset-x-0 top-4 z-[120] flex justify-center px-4 pointer-events-none" dir="rtl">
+          <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-amber-200 bg-white/95 p-4 text-right shadow-[0_18px_45px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
             <h2 className="text-lg font-black text-slate-900">الجلسة هتنتهي قريب</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               لسه فاضل حوالي {warningSecondsLeft} ثانية قبل تسجيل الخروج التلقائي بسبب عدم النشاط.

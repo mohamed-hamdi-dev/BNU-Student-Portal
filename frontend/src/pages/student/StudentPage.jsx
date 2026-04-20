@@ -41,6 +41,7 @@ function PersonData({ user, onUserUpdate, forcePasswordChange = false, onPasswor
     const [showMenu, setShowMenu] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+    const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
     const [changePasswordForm, setChangePasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
     const [passwordErrors, setPasswordErrors] = useState({});
     const [changePasswordLoading, setChangePasswordLoading] = useState(false);
@@ -56,8 +57,19 @@ function PersonData({ user, onUserUpdate, forcePasswordChange = false, onPasswor
     const [profileSaving, setProfileSaving] = useState(false);
     const menuRef = useRef(null);
     const officialName = user.universityName || user.full_name || user.NameID || user.username || "-";
+    const profileInitials = String(officialName || "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join("");
+    const effectiveProfilePhotoUrl = !profilePhotoFailed ? String(user.profilePhotoUrl || "").trim() : "";
     const avatarObjectX = Math.max(0, Math.min(100, Number(user?.avatarObjectX ?? user?.avatar_object_x ?? 50) || 50));
     const avatarObjectY = 18;
+
+    useEffect(() => {
+        setProfilePhotoFailed(false);
+    }, [user.profilePhotoUrl]);
 
     const UPDATE_INTERVAL = 20;
     const Toast = Swal.mixin({
@@ -368,15 +380,23 @@ function PersonData({ user, onUserUpdate, forcePasswordChange = false, onPasswor
 
                     <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2">
                         <div className="bg-white p-2 rounded-full shadow-2xl ring-8 ring-white/50">
-                            <img
-                                src={
-                                    user.profilePhotoUrl ||
-                                    `https://ui-avatars.com/api/?name=${encodeURIComponent(officialName || "Student")}&background=05ADCF&color=fff&size=128`
-                                }
-                                alt={t("person_profile")}
-                                className="w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 rounded-full object-cover bg-white border-4 border-[#05ADCF]"
-                                style={{ objectPosition: `${avatarObjectX}% ${avatarObjectY}%` }}
-                            />
+                            <div className="w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 rounded-full bg-white border-4 border-[#05ADCF] overflow-hidden flex items-center justify-center">
+                                {effectiveProfilePhotoUrl ? (
+                                    <img
+                                        src={effectiveProfilePhotoUrl}
+                                        alt={t("person_profile")}
+                                        className="w-full h-full rounded-full object-cover bg-white"
+                                        style={{ objectPosition: `${avatarObjectX}% ${avatarObjectY}%` }}
+                                        onError={() => setProfilePhotoFailed(true)}
+                                    />
+                                ) : profileInitials ? (
+                                    <span className="text-[1.15rem] sm:text-[1.35rem] lg:text-[1.6rem] font-black text-[#05ADCF]">
+                                        {profileInitials}
+                                    </span>
+                                ) : (
+                                    <User className="w-8 h-8 sm:w-10 sm:h-10 text-[#05ADCF]" />
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -11,10 +11,10 @@ import re
 import zipfile
 from xml.etree import ElementTree as ET
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from fastapi.responses import FileResponse
 
 from core.deps import get_db, get_current_user, require_role, resolve_authenticated_user_from_token, security_scheme
@@ -32,8 +32,16 @@ _STORAGE_FILE_ROUTE_RE = re.compile(r"/api/storage/files/([^/?#]+)", re.IGNORECA
 
 
 def ensure_storage_schema(db: Session):
-    """Schema is managed centrally by ORM metadata creation."""
-    return None
+    existing = {col["name"] for col in inspect(db.bind).get_columns("storage_items")}
+    if "file_bytes" in existing:
+        return
+    dialect = str(getattr(db.bind.dialect, "name", "") or "").lower()
+    ddl = "BYTEA" if dialect == "postgresql" else "BLOB"
+    try:
+        db.execute(text(f"ALTER TABLE storage_items ADD COLUMN file_bytes {ddl}"))
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 def _normalize_scope_text(value: str) -> str:
@@ -345,6 +353,7 @@ async def list_storage(
     current_user: User = Depends(get_current_user),
 ):
     """Get storage metadata. Students see records matching their scope."""
+    ensure_storage_schema(db)
     query = db.query(StorageItem)
 
     if category_filter:
@@ -366,6 +375,7 @@ async def create_storage_item(
     current_user: User = Depends(get_current_user),
 ):
     """Add a new storage metadata row."""
+    ensure_storage_schema(db)
     item = StorageItem(owner_id=current_user.id, **item_in.model_dump())
     db.add(item)
     db.commit()
@@ -407,6 +417,7 @@ async def upload_and_index_storage_pdf(
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File is too large (max 20MB)")
 
+    ensure_storage_schema(db)
     stored_name = f"{uuid4().hex}{ext}"
     destination = STORAGE_FILES_DIR / stored_name
     destination.write_bytes(content)
@@ -419,6 +430,7 @@ async def upload_and_index_storage_pdf(
         is_favorite=bool(is_favorite),
         is_indexed=ext in {".pdf", ".docx"},
         stored_name=stored_name,
+        file_bytes=content,
         owner_id=current_user.id,
     )
     db.add(item)
@@ -496,6 +508,7 @@ async def index_existing_storage_pdf(
     current_user: User = Depends(get_current_user),
 ):
     """Index an existing stored PDF file and mark it indexed."""
+    ensure_storage_schema(db)
     item = db.query(StorageItem).filter(StorageItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="File not found")
@@ -505,15 +518,16 @@ async def index_existing_storage_pdf(
         raise HTTPException(status_code=400, detail="This file has no stored binary reference. Re-upload required.")
 
     file_path = (STORAGE_FILES_DIR / Path(stored_name).name).resolve()
-    if not str(file_path).startswith(str(STORAGE_FILES_DIR.resolve())) or not file_path.exists():
+    if not str(file_path).startswith(str(STORAGE_FILES_DIR.resolve())):
         raise HTTPException(status_code=404, detail="Stored file not found on disk.")
     ext = file_path.suffix.lower()
+    content = file_path.read_bytes() if file_path.exists() else (bytes(item.file_bytes) if item.file_bytes else b"")
+    if not content:
+        raise HTTPException(status_code=404, detail="Stored file not found on disk.")
     if ext == ".doc":
         raise HTTPException(status_code=400, detail="DOC files are not supported. Please re-upload as DOCX or PDF.")
     if ext not in {".pdf", ".docx"}:
         raise HTTPException(status_code=400, detail="Only PDF or DOCX files can be indexed.")
-
-    content = file_path.read_bytes()
     pages = _pdf_pages_from_upload(content) if ext == ".pdf" else _docx_pages_from_upload(content)
     if not pages:
         raise HTTPException(status_code=400, detail="No extractable text was found in this file.")
@@ -570,6 +584,7 @@ async def update_storage_item(
     db: Session = Depends(get_db),
 ):
     """Rename or mark storage item as favorite."""
+    ensure_storage_schema(db)
     item = db.query(StorageItem).filter(StorageItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="File not found")
@@ -586,6 +601,7 @@ async def update_storage_item(
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_role("admin"))])
 async def delete_storage_item(item_id: int, db: Session = Depends(get_db)):
     """Delete storage item, file binary, vector chunks, and linked content traces."""
+    ensure_storage_schema(db)
     item = db.query(StorageItem).filter(StorageItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="File not found")
@@ -685,8 +701,9 @@ async def serve_storage_file(
     current_user: User = Depends(get_current_user_for_file_access),
 ):
     """Serve uploaded storage files (authenticated users only)."""
+    ensure_storage_schema(db)
     file_path = (STORAGE_FILES_DIR / Path(stored_name).name).resolve()
-    if not file_path.exists() or not str(file_path).startswith(str(STORAGE_FILES_DIR.resolve())):
+    if not str(file_path).startswith(str(STORAGE_FILES_DIR.resolve())):
         raise HTTPException(status_code=404, detail="File not found")
 
     item = db.query(StorageItem).filter(StorageItem.stored_name == Path(stored_name).name).first()
@@ -706,9 +723,19 @@ async def serve_storage_file(
         media_type = "image/webp"
     elif file_path.suffix.lower() == ".gif":
         media_type = "image/gif"
-    return FileResponse(
-        path=file_path,
-        filename=file_path.name,
-        media_type=media_type,
-        content_disposition_type="inline",
-    )
+    if file_path.exists():
+        return FileResponse(
+            path=file_path,
+            filename=file_path.name,
+            media_type=media_type,
+            content_disposition_type="inline",
+        )
+
+    if item is not None and item.file_bytes:
+        return Response(
+            content=bytes(item.file_bytes),
+            media_type=media_type or "application/octet-stream",
+            headers={"Content-Disposition": f'inline; filename="{Path(stored_name).name}"'},
+        )
+
+    raise HTTPException(status_code=404, detail="File not found")

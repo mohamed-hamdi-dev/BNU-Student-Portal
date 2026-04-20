@@ -1,5 +1,5 @@
 ﻿import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Move, Search, Upload, X } from "lucide-react";
+import { Camera, Eye, EyeOff, Move, Search, Upload, User, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AuthContext } from "../../context/AuthContext";
 import { getMyDisplayProfilePhoto, uploadMyProfilePhoto } from "../../services/profilePhotoApi";
@@ -58,6 +58,7 @@ export default function AdminPasswordPage() {
     const { currentUser, setCurrentUser } = useContext(AuthContext);
 
     const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    const [showPassword, setShowPassword] = useState({ current: false, next: false, confirm: false });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [status, setStatus] = useState(null);
 
@@ -81,8 +82,14 @@ export default function AdminPasswordPage() {
 
     const displayName = useMemo(() => currentUser?.name || currentUser?.full_name || currentUser?.username || "User", [currentUser]);
     const displayUsername = useMemo(() => currentUser?.username || currentUser?.id || "-", [currentUser]);
-    const fallbackAvatar = useMemo(
-        () => `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || "User")}&background=05ADCF&color=fff&size=128`,
+    const fallbackAvatarLetters = useMemo(
+        () =>
+            String(displayName || "User")
+                .trim()
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((part) => part.charAt(0).toUpperCase())
+                .join(""),
         [displayName]
     );
 
@@ -384,27 +391,60 @@ export default function AdminPasswordPage() {
         }
     };
 
+    const renderPasswordField = (fieldKey, label, fieldName) => {
+        const isVisible = Boolean(showPassword[fieldKey]);
+        return (
+            <label className="text-sm font-bold text-slate-700">
+                {label}
+                <div className="relative mt-1">
+                    <input
+                        type={isVisible ? "text" : "password"}
+                        className={`w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 text-sm outline-none transition focus:border-cyan-400 focus:bg-white ${isRTL ? "pl-12 pr-4" : "pr-12 pl-4"}`}
+                        value={form[fieldName]}
+                        onChange={(e) => setForm((prev) => ({ ...prev, [fieldName]: e.target.value }))}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setShowPassword((prev) => ({ ...prev, [fieldKey]: !prev[fieldKey] }))}
+                        className={`absolute top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 ${isRTL ? "left-2" : "right-2"}`}
+                        aria-label={isVisible ? (isRTL ? "إخفاء كلمة المرور" : "Hide password") : (isRTL ? "إظهار كلمة المرور" : "Show password")}
+                        title={isVisible ? (isRTL ? "إخفاء كلمة المرور" : "Hide password") : (isRTL ? "إظهار كلمة المرور" : "Show password")}
+                    >
+                        {isVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                </div>
+            </label>
+        );
+    };
+
     return (
         <div className={`mx-auto w-full max-w-3xl ${isRTL ? "text-right" : "text-left"}`} dir={isRTL ? "rtl" : "ltr"}>
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_18px_40px_-28px_rgba(15,23,42,.45)] md:p-8">
                 <div className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                     <div className={`flex items-center gap-3 ${isRTL ? "" : "flex-row-reverse"}`}>
-                            <img
-                                src={(avatarLoadFailed ? "" : (avatarUrl || currentUser?.profilePhotoUrl || "")) || fallbackAvatar}
-                                alt="profile"
-                                className="rounded-2xl border-2 border-white object-cover bg-slate-100 shadow-md"
+                            <div
+                                className="rounded-2xl border-2 border-white bg-slate-100 shadow-md overflow-hidden flex items-center justify-center"
                                 style={{
                                     width: `${Math.max(56, Math.min(120, Number(avatarSizePx || 48)))}px`,
                                     height: `${Math.max(56, Math.min(120, Number(avatarSizePx || 48)))}px`,
-                                    objectPosition: `${Math.max(0, Math.min(100, Number(avatarObjectX || 50)))}% ${Math.max(0, Math.min(100, Number(avatarObjectY || 50)))}%`,
                                 }}
-                                onError={(event) => {
-                                    if (event.currentTarget.src !== fallbackAvatar) {
-                                        setAvatarLoadFailed(true);
-                                        event.currentTarget.src = fallbackAvatar;
-                                    }
-                                }}
-                            />
+                            >
+                                {!avatarLoadFailed && (avatarUrl || currentUser?.profilePhotoUrl || "") ? (
+                                    <img
+                                        src={avatarUrl || currentUser?.profilePhotoUrl || ""}
+                                        alt="profile"
+                                        className="h-full w-full object-cover bg-slate-100"
+                                        style={{
+                                            objectPosition: `${Math.max(0, Math.min(100, Number(avatarObjectX || 50)))}% ${Math.max(0, Math.min(100, Number(avatarObjectY || 50)))}%`,
+                                        }}
+                                        onError={() => setAvatarLoadFailed(true)}
+                                    />
+                                ) : fallbackAvatarLetters ? (
+                                    <span className="text-lg font-black text-cyan-700">{fallbackAvatarLetters}</span>
+                                ) : (
+                                    <User className="h-8 w-8 text-cyan-700" />
+                                )}
+                            </div>
                         <div className={isRTL ? "text-right" : "text-left"}>
                             <p className="text-sm text-slate-500">{t("admin_profile_account_data")}</p>
                             <p className="text-base font-black text-slate-800">{displayName}</p>
@@ -430,35 +470,9 @@ export default function AdminPasswordPage() {
                 <p className="mt-1 text-xs font-medium text-slate-500">{t("admin_profile_password_hint")}</p>
 
                 <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
-                    <label className="text-sm font-bold text-slate-700">
-                        {t("admin_profile_current_password")}
-                        <input
-                            type="password"
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none transition focus:border-cyan-400 focus:bg-white"
-                            value={form.currentPassword}
-                            onChange={(e) => setForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
-                        />
-                    </label>
-
-                    <label className="text-sm font-bold text-slate-700">
-                        {t("admin_profile_new_password")}
-                        <input
-                            type="password"
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none transition focus:border-cyan-400 focus:bg-white"
-                            value={form.newPassword}
-                            onChange={(e) => setForm((prev) => ({ ...prev, newPassword: e.target.value }))}
-                        />
-                    </label>
-
-                    <label className="text-sm font-bold text-slate-700">
-                        {t("admin_profile_confirm_password")}
-                        <input
-                            type="password"
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none transition focus:border-cyan-400 focus:bg-white"
-                            value={form.confirmPassword}
-                            onChange={(e) => setForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-                        />
-                    </label>
+                    {renderPasswordField("current", t("admin_profile_current_password"), "currentPassword")}
+                    {renderPasswordField("next", t("admin_profile_new_password"), "newPassword")}
+                    {renderPasswordField("confirm", t("admin_profile_confirm_password"), "confirmPassword")}
 
                     <button
                         type="submit"

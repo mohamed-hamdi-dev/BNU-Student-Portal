@@ -1,12 +1,12 @@
 ﻿import React, { useContext, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, LayoutDashboard, BookOpenCheck, SlidersHorizontal, Settings, UserRound, QrCode, Users, LogOut, IdCard, GraduationCap, MessageCircle, Image, ListChecks, KeyRound, MapPin, ClipboardList, ClipboardCheck, Landmark, Bell } from "lucide-react";
+import { Menu, X, LayoutDashboard, BookOpenCheck, SlidersHorizontal, Settings, UserRound, QrCode, Users, LogOut, IdCard, GraduationCap, MessageCircle, Image, ListChecks, KeyRound, MapPin, ClipboardList, ClipboardCheck, Landmark, Bell, ShieldCheck } from "lucide-react";
 import { AuthContext } from "../../context/AuthContext";
 import { ThemeContext } from "../../context/ThemeContext.jsx";
 import ThemeToggle from "../../components/common/ThemeToggle.jsx";
 import ChangeLang from "../../components/Changelang.jsx";
 import { apiFetch } from "../../services/api";
-import { withAccessToken } from "../../services/profilePhotoApi.js";
+import { getMyDisplayProfilePhoto, withAccessToken } from "../../services/profilePhotoApi.js";
 import { useTranslation } from "react-i18next";
 
 const menuItems = [
@@ -34,6 +34,7 @@ export default function AdminPortalLayout() {
     const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
     const [liveChatUnreadCount, setLiveChatUnreadCount] = useState(0);
     const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
+    const [resolvedProfilePhotoUrl, setResolvedProfilePhotoUrl] = useState("");
 
     const location = useLocation();
     const navigate = useNavigate();
@@ -44,7 +45,7 @@ export default function AdminPortalLayout() {
     const displayName = currentUser?.name || currentUser?.username || t("default_user");
     const displayUsername = currentUser?.username || currentUser?.id || "-";
     const accessToken = String(localStorage.getItem("access_token") || "").trim();
-    const profilePhotoUrl = !profilePhotoFailed && accessToken ? withAccessToken(currentUser?.profilePhotoUrl || "", accessToken) : "";
+    const profilePhotoUrl = !profilePhotoFailed && accessToken ? (resolvedProfilePhotoUrl || withAccessToken(currentUser?.profilePhotoUrl || "", accessToken)) : "";
 
     const avatarLetters = (displayName || "Admin User")
         .trim()
@@ -94,7 +95,37 @@ export default function AdminPortalLayout() {
 
     useEffect(() => {
         setProfilePhotoFailed(false);
-    }, [currentUser?.profilePhotoUrl, accessToken]);
+    }, [currentUser?.profilePhotoUrl, resolvedProfilePhotoUrl, accessToken]);
+
+    useEffect(() => {
+        if (!currentUser?.username || !accessToken) {
+            setResolvedProfilePhotoUrl("");
+            setProfilePhotoFailed(false);
+            return;
+        }
+        let cancelled = false;
+        const loadProfilePhoto = async () => {
+            try {
+                const row = await getMyDisplayProfilePhoto();
+                if (cancelled) return;
+                if (!row?.fileUrl) {
+                    setResolvedProfilePhotoUrl("");
+                    setProfilePhotoFailed(false);
+                    return;
+                }
+                setResolvedProfilePhotoUrl(withAccessToken(row.fileUrl, accessToken));
+                setProfilePhotoFailed(false);
+            } catch {
+                if (cancelled) return;
+                setResolvedProfilePhotoUrl("");
+                setProfilePhotoFailed(false);
+            }
+        };
+        loadProfilePhoto();
+        return () => {
+            cancelled = true;
+        };
+    }, [currentUser?.username, accessToken]);
 
     useEffect(() => {
         if (!canAccessLiveChat) {
@@ -145,17 +176,26 @@ export default function AdminPortalLayout() {
                             : "w-20"
                     } flex flex-col`}
                 >
-                    <div className={`h-16 px-4 border-b flex items-center justify-between ${isDarkMode ? "border-slate-800" : "border-slate-200"}`}>
+                    <div className={`min-h-16 px-4 py-3 border-b flex items-center justify-between ${isDarkMode ? "border-slate-800" : "border-slate-200"}`}>
                         {showFullLabels ? (
-                            <span className="font-black text-sm flex items-center gap-2">
-                                <span className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm ${isDarkMode ? "bg-cyan-500 text-white" : "bg-sky-100 text-sky-700"}`}>
-                                    <GraduationCap size={18} />
+                            <div className={`min-w-0 flex items-center gap-3 rounded-2xl border px-3 py-2 shadow-sm ${isDarkMode ? "border-slate-700 bg-slate-800/80" : "border-sky-100 bg-sky-50/80"}`}>
+                                <span className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm ${isDarkMode ? "bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-600 text-white" : "bg-gradient-to-br from-sky-500 via-cyan-500 to-sky-700 text-white"}`}>
+                                    <GraduationCap size={20} />
+                                    <span className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm ${isDarkMode ? "border-slate-900 bg-slate-950 text-cyan-300" : "border-white bg-white text-sky-700"}`}>
+                                        <ShieldCheck size={12} />
+                                    </span>
                                 </span>
-                                <span>{t("brand_name")}</span>
-                            </span>
+                                <span className="min-w-0">
+                                    <span className={`block truncate text-sm font-black ${isDarkMode ? "text-white" : "text-slate-900"}`}>{t("brand_name")}</span>
+                                    <span className={`mt-0.5 block text-[10px] font-bold uppercase tracking-[0.24em] ${isDarkMode ? "text-cyan-200/80" : "text-sky-700/70"}`}>Admin Console</span>
+                                </span>
+                            </div>
                         ) : (
-                            <span className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm ${isDarkMode ? "bg-cyan-500 text-white" : "bg-sky-100 text-sky-700"}`}>
+                            <span className={`relative flex h-10 w-10 items-center justify-center rounded-2xl shadow-sm ${isDarkMode ? "bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-600 text-white" : "bg-gradient-to-br from-sky-500 via-cyan-500 to-sky-700 text-white"}`}>
                                 <GraduationCap size={18} />
+                                <span className={`absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border shadow-sm ${isDarkMode ? "border-slate-900 bg-slate-950 text-cyan-300" : "border-white bg-white text-sky-700"}`}>
+                                    <ShieldCheck size={10} />
+                                </span>
                             </span>
                         )}
                         {isMobile && (
@@ -173,15 +213,15 @@ export default function AdminPortalLayout() {
 
                     {showFullLabels && (
                         <div className={`px-4 py-3 border-b text-xs ${isDarkMode ? "border-slate-800 text-slate-300" : "border-slate-200 text-slate-500"}`}>
-                            <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-xl border overflow-hidden flex items-center justify-center font-black ${isDarkMode ? "border-slate-700 bg-cyan-600 text-white" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
+                            <div className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 ${isDarkMode ? "border-slate-800 bg-slate-800/60" : "border-slate-200 bg-slate-50/90"}`}>
+                                <div className={`h-12 w-12 shrink-0 rounded-2xl border overflow-hidden flex items-center justify-center font-black shadow-sm ${isDarkMode ? "border-slate-700 bg-cyan-600 text-white" : "border-sky-200 bg-white text-sky-700"}`}>
                                     {profilePhotoUrl ? <img src={profilePhotoUrl} alt="profile" className="w-full h-full object-cover" onError={() => setProfilePhotoFailed(true)} /> : avatarLetters}
                                 </div>
-                                <div>
-                                    <p className={`font-black ${isDarkMode ? "text-white" : "text-slate-800"}`}>{displayName}</p>
-                                    <p className={`mt-1 text-[11px] inline-flex items-center gap-1 ${isDarkMode ? "text-slate-300" : "text-slate-500"}`}>
+                                <div className="min-w-0 flex-1">
+                                    <p className={`truncate text-sm font-black ${isDarkMode ? "text-white" : "text-slate-900"}`}>{displayName}</p>
+                                    <p className={`mt-1 inline-flex max-w-full items-center gap-1 text-[11px] ${isDarkMode ? "text-slate-300" : "text-slate-500"}`}>
                                         <IdCard size={16} />
-                                        <span>{displayUsername}</span>
+                                        <span className="truncate">{displayUsername}</span>
                                     </p>
                                 </div>
                             </div>
