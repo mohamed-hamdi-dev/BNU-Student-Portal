@@ -1591,6 +1591,58 @@ def _calculate_effective_gpa(db: Session, profile: StudentAcademicProfile) -> fl
     return round(total_points / total_credits, 2)
 
 
+def _sync_student_profile_academic_metrics_from_published_grades(
+    db: Session,
+    profile: StudentAcademicProfile,
+) -> StudentAcademicProfile:
+    rows = (
+        db.query(CourseOffering.course_id, GradeBook.grade, GradeBook.total, CourseCatalog.credit_hours, CourseCatalog.max_total)
+        .join(CourseOffering, CourseOffering.id == GradeBook.offering_id)
+        .join(CourseCatalog, CourseCatalog.id == CourseOffering.course_id)
+        .filter(
+            GradeBook.student_user_id == profile.student_user_id,
+            GradeBook.publish_status == "published",
+        )
+        .all()
+    )
+    if not rows:
+        return profile
+
+    total_points = 0.0
+    total_credits = 0.0
+    passed_course_ids: set[int] = set()
+    passed_hours = 0.0
+
+    for course_id, grade, total, credit_hours, max_total in rows:
+        credits = float(credit_hours or 0.0)
+        if credits > 0:
+            points = _grade_to_gpa_points(grade, total, max_total)
+            if points is not None:
+                total_points += points * credits
+                total_credits += credits
+
+        if course_id is None or int(course_id) in passed_course_ids:
+            continue
+        normalized_grade = (grade or "").strip().upper()
+        is_passed = normalized_grade in PASSING_GRADES or (total is not None and float(total) >= 50.0)
+        if not is_passed:
+            continue
+        passed_course_ids.add(int(course_id))
+        passed_hours += credits
+
+    next_gpa = round(total_points / total_credits, 2) if total_credits > 0 else float(profile.gpa or 0.0)
+    next_passed_hours = round(float(passed_hours or 0.0), 2)
+    if float(profile.gpa or 0.0) == next_gpa and float(getattr(profile, "passed_hours", 0.0) or 0.0) == next_passed_hours:
+        return profile
+
+    profile.gpa = next_gpa
+    profile.passed_hours = next_passed_hours
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
 def _build_passed_course_sets(db: Session, student_user_id: int) -> tuple[set[int], dict[int, str]]:
     rows = (
         db.query(CourseOffering.course_id, GradeBook.grade, GradeBook.total)
@@ -2395,7 +2447,8 @@ async def update_student_academic_metrics(
 async def my_profile(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Students only")
-    return _get_student_profile(db, current_user.id)
+    profile = _get_student_profile(db, current_user.id)
+    return _sync_student_profile_academic_metrics_from_published_grades(db, profile)
 
 
 @router.post("/tracks/select/{track_id}", response_model=StudentProfileResponse)

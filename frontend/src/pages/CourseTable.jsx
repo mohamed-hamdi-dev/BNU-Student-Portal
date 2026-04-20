@@ -607,7 +607,7 @@ export default function CourseTablePage() {
                                 <div className="p-2 bg-cyan-100 text-cyan-700 md:bg-white/30 md:text-white rounded-lg">
                                     <Clock size={20} />
                                 </div>
-                                <span className="text-xs font-bold text-slate-700 md:text-white uppercase tracking-widest">{t("course_table_hours")}</span>
+                                <span className="text-xs font-bold text-slate-700 md:text-white uppercase tracking-widest">{t("course_table_passed_hours")}</span>
                             </div>
                             <div className="text-[clamp(1.3rem,2vw,1.6rem)] font-black text-slate-900 md:text-white">{totalCredits}</div>
                         </div>
@@ -649,7 +649,6 @@ export default function CourseTablePage() {
         </div>
     );
 }
-
 
 
 

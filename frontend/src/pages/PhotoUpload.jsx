@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, Move, Search, Upload, User, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { getMyProfilePhoto, uploadMyProfilePhoto } from "../services/profilePhotoApi";
+import { getMyDisplayProfilePhoto, getMyProfilePhoto, uploadMyProfilePhoto } from "../services/profilePhotoApi";
 import { ThemeContext } from "../context/ThemeContext";
 
 const statusMap = {
@@ -85,6 +85,7 @@ export default function PhotoUpload() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [serverPhoto, setServerPhoto] = useState(null);
+  const [displayPhoto, setDisplayPhoto] = useState(null);
   const [serverPhotoFailed, setServerPhotoFailed] = useState(false);
   const [message, setMessage] = useState("");
   const [cropX, setCropX] = useState(0);
@@ -106,10 +107,15 @@ export default function PhotoUpload() {
   useEffect(() => {
     const load = async () => {
       try {
-        const row = await getMyProfilePhoto();
-        setServerPhoto(row);
+        const [latestRow, displayRow] = await Promise.all([
+          getMyProfilePhoto().catch(() => null),
+          getMyDisplayProfilePhoto().catch(() => null),
+        ]);
+        setServerPhoto(latestRow);
+        setDisplayPhoto(displayRow);
       } catch {
         setServerPhoto(null);
+        setDisplayPhoto(null);
       }
     };
     load();
@@ -175,6 +181,7 @@ export default function PhotoUpload() {
       const uploadFile = new File([blob], `${selectedFile.name.replace(/\.[^.]+$/, "")}_profile.jpg`, { type: "image/jpeg" });
       const row = await uploadMyProfilePhoto(uploadFile);
       setServerPhoto(row);
+      setDisplayPhoto(row);
       setSelectedFile(null);
       setPreview("");
       setFileName("");
@@ -198,7 +205,7 @@ export default function PhotoUpload() {
     : serverPhoto?.status === "rejected"
     ? t("photo_upload_action_upload_replacement")
     : t("photo_upload_action_upload_for_review");
-  const serverPhotoUrl = withToken(serverPhoto?.fileUrl);
+  const serverPhotoUrl = withToken(displayPhoto?.fileUrl || serverPhoto?.fileUrl);
   const previewImageSrc = cardPreview || (!serverPhotoFailed && serverPhotoUrl) || "";
   const previewInitials = String(user?.name || "Student")
     .trim()

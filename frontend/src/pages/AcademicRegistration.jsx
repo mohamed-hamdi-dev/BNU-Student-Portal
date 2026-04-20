@@ -1855,10 +1855,10 @@ const App = () => {
                             </div>
                             <div className="bg-[#05ADCF] p-5 rounded-2xl text-white shadow-xl shadow-[#05ADCF]/20 relative overflow-hidden">
                                 <div className="relative z-10">
-                                    <p className="text-[10px] opacity-80 font-bold mb-1 uppercase tracking-widest">الساعات التراكمية المجتازة</p>
+                                    <p className="text-[10px] opacity-80 font-bold mb-1 uppercase tracking-widest">{t("academic_reg_passed_hours")}</p>
                                     <div className="flex justify-between items-end">
                                         <span className="text-4xl font-black">{Number(studentInfo.completedHours || 0)}</span>
-                                        <span className="text-xs opacity-70 mb-1">المسجل هذا الترم: {totalRegisteredHours}</span>
+                                        <span className="text-xs opacity-70 mb-1">{t("academic_reg_current_term_registered_hours", { hours: totalRegisteredHours })}</span>
                                     </div>
                                     <div className="h-1.5 bg-white/20 rounded-full mt-4 overflow-hidden">
                                         <div
@@ -2525,5 +2525,4 @@ const App = () => {
 };
 
 export default App;
-
 
