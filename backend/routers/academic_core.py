@@ -13,13 +13,6 @@ from sqlalchemy.orm import Session
 from core.deps import get_current_user, get_db, require_role
 from core.academic_engine import AcademicRegulationsEngine
 from core.registration_conflicts import validate_schedule_conflicts
-from services.registration_eligibility import (
-    ELIGIBILITY_ADMIN_OVERRIDE,
-    ELIGIBILITY_ADVISOR_REQUIRED,
-    ELIGIBILITY_ALLOWED,
-    ELIGIBILITY_BLOCKED,
-    evaluate_course_eligibility,
-)
 from models.academic_core import (
     AssessmentTemplate,
     AssessmentTemplateComponent,
@@ -35,7 +28,6 @@ from models.academic_core import (
     CurriculumPlan,
     GradeBook,
     ProgramRegulation,
-    RegistrationEligibilityPolicy,
     RegistrationCourseSelection,
     RegistrationRequest,
     RegistrationWindow,
@@ -71,8 +63,6 @@ from schemas.academic_core import (
     OfferingResponse,
     RegistrationRequestResponse,
     RegistrationSelectionResponse,
-    RegistrationEligibilityPolicyResponse,
-    RegistrationEligibilityPolicyUpdate,
     AdvisorRegistrationDecision,
     AdvisorRegistrationRequestCreate,
     AdvisorRegistrationManagePayload,
@@ -103,42 +93,16 @@ SEAT_OCCUPYING_REQUEST_STATUSES = {
     "submitted",
     "advisor_requested",
     "advisor_approved",
-    "admin_override_pending",
-    "admin_override_approved",
     "need_info",
     "registered",
     "locked",
     "approved",
 }
 
-DEFAULT_REGISTRATION_ELIGIBILITY_POLICY = {
-    "allow_higher_year": True,
-    "max_year_jump": 1,
-    "min_gpa": 2.5,
-    "min_earned_hours": 60,
-    "require_advisor_approval_for_higher_year": True,
-    "allow_admin_override": True,
-    "strict_conflict_check": True,
-    "max_credits_normal": 18,
-    "max_credits_overload": 21,
-    "is_active": True,
-}
-
 
 def ensure_academic_core_schema(db: Session) -> None:
-    bind = db.get_bind()
-    RegistrationEligibilityPolicy.__table__.create(bind=bind, checkfirst=True)
-
-
-def _get_registration_eligibility_policy(db: Session) -> RegistrationEligibilityPolicy:
-    ensure_academic_core_schema(db)
-    row = db.query(RegistrationEligibilityPolicy).order_by(RegistrationEligibilityPolicy.id.asc()).first()
-    if row:
-        return row
-    row = RegistrationEligibilityPolicy(**DEFAULT_REGISTRATION_ELIGIBILITY_POLICY)
-    db.add(row)
-    db.flush()
-    return row
+    """Schema is managed centrally by ORM metadata creation."""
+    return None
 
 
 def _now() -> datetime:
@@ -591,7 +555,7 @@ def _section_capacity_snapshot(
         }
     return snapshot
 def _is_request_locked_for_edit(req: RegistrationRequest) -> bool:
-    locked_statuses = {"advisor_approved", "admin_override_approved", "registered", "locked", "approved"}
+    locked_statuses = {"advisor_approved", "registered", "locked", "approved"}
     return str(req.status or "").strip().lower() in locked_statuses or bool(req.locked_at)
 
 
@@ -1068,13 +1032,10 @@ def _apply_registration_request_selections(
 
     current_gpa = _calculate_effective_gpa(db, profile)
     min_credits, max_credits = _resolve_credit_limits(db, profile, current_gpa)
-    registration_policy = _get_registration_eligibility_policy(db)
-    max_overload_credits = int(getattr(registration_policy, "max_credits_overload", 0) or 0)
-    effective_hard_max = float(max(max_credits, max_overload_credits)) if max_overload_credits > 0 else float(max_credits)
-    if total_credit_hours > effective_hard_max:
+    if total_credit_hours > float(max_credits):
         raise HTTPException(
             status_code=400,
-            detail=f"Selected credit hours ({total_credit_hours:g}) exceed allowed max ({effective_hard_max:g}) for GPA {float(current_gpa or 0.0):.2f}",
+            detail=f"Selected credit hours ({total_credit_hours:g}) exceed allowed max ({max_credits}) for GPA {float(current_gpa or 0.0):.2f}",
         )
     if unique_offering_ids and total_credit_hours < float(min_credits):
         raise HTTPException(
@@ -1135,7 +1096,7 @@ def _apply_registration_request_selections(
             "allowed_credit_hours": {"min": min_credits, "max": max_credits},
         },
     )
-    return total_credit_hours, min_credits, int(effective_hard_max)
+    return total_credit_hours, min_credits, max_credits
 
 
 def _validate_offering_for_student(db: Session, offering: CourseOffering, profile: StudentAcademicProfile) -> None:
@@ -1144,6 +1105,16 @@ def _validate_offering_for_student(db: Session, offering: CourseOffering, profil
         raise HTTPException(status_code=400, detail="Invalid offering course")
     if course.college_id and profile.college_id and course.college_id != profile.college_id:
         raise HTTPException(status_code=400, detail=f"Course {course.code} belongs to another college")
+    if (
+        course.study_year is not None
+        and profile.current_study_year is not None
+        and int(course.study_year) > int(profile.current_study_year)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Course {course.code} is in a future study year and is not yet eligible",
+        )
+
     college = db.query(College).filter(College.id == profile.college_id).first() if profile.college_id else None
     if not college or not college.branching_start_year:
         return
@@ -1238,156 +1209,6 @@ def _offering_eligibility_for_student(
     return "open", None
 
 
-def _existing_term_registration_rows(
-    db: Session,
-    *,
-    student_user_id: int,
-    academic_year_label: str,
-    semester: str,
-    exclude_request_id: int | None = None,
-) -> list[tuple[RegistrationCourseSelection, CourseOffering, CourseCatalog]]:
-    query = (
-        db.query(RegistrationCourseSelection, CourseOffering, CourseCatalog)
-        .join(RegistrationRequest, RegistrationRequest.id == RegistrationCourseSelection.registration_request_id)
-        .join(CourseOffering, CourseOffering.id == RegistrationCourseSelection.offering_id)
-        .join(CourseCatalog, CourseCatalog.id == CourseOffering.course_id)
-        .filter(
-            RegistrationCourseSelection.student_user_id == int(student_user_id),
-            RegistrationRequest.academic_year_label == str(academic_year_label),
-            RegistrationRequest.semester == str(semester),
-            RegistrationRequest.status.in_(SEAT_OCCUPYING_REQUEST_STATUSES),
-        )
-    )
-    if exclude_request_id is not None:
-        query = query.filter(RegistrationCourseSelection.registration_request_id != int(exclude_request_id))
-    return query.all()
-
-
-def _serialize_offering_payload(offering: CourseOffering, course: CourseCatalog) -> dict[str, Any]:
-    return {
-        "offering_id": int(offering.id),
-        "course_id": int(course.id),
-        "course_code": course.code,
-        "course_title_ar": course.title_ar,
-        "section": offering.section,
-        "day_of_week": offering.day_of_week,
-        "start_time": offering.start_time,
-        "end_time": offering.end_time,
-        "session_type": "lecture",
-    }
-
-
-def _evaluate_offering_eligibility_for_student(
-    db: Session,
-    *,
-    offering: CourseOffering,
-    course: CourseCatalog | None,
-    profile: StudentAcademicProfile,
-    current_gpa: float,
-    policy: RegistrationEligibilityPolicy,
-    passed_course_ids: set[int],
-    grades_by_course: dict[int, str],
-    existing_active_rows: list[tuple[RegistrationCourseSelection, CourseOffering, CourseCatalog]],
-    current_term_registered_hours: float,
-    seat_snapshot: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if not course:
-        return {
-            "status": ELIGIBILITY_BLOCKED,
-            "reasons": ["Course catalog entry is missing for this offering"],
-            "warnings": [],
-        }
-
-    additional_blockers: list[str] = []
-    if course.college_id and profile.college_id and course.college_id != profile.college_id:
-        additional_blockers.append(f"Course {course.code} belongs to another college")
-
-    college = db.query(College).filter(College.id == profile.college_id).first() if profile.college_id else None
-    if college and college.branching_start_year:
-        if profile.current_study_year >= college.branching_start_year:
-            if course.track_id and profile.current_track_id and course.track_id != profile.current_track_id:
-                additional_blockers.append(f"Course {course.code} is for a different track")
-        elif course.track_id:
-            additional_blockers.append(f"Course {course.code} is track-specific before branching year")
-
-    prerequisite_reason = ""
-    prerequisites_satisfied = True
-    try:
-        _validate_prerequisites_for_course(
-            db=db,
-            course=course,
-            passed_course_ids=passed_course_ids,
-            grades_by_course=grades_by_course,
-            selected_course_ids=set(),
-        )
-    except HTTPException as exc:
-        prerequisites_satisfied = False
-        prerequisite_reason = str(getattr(exc, "detail", "") or "").strip()
-
-    existing_active_course_ids: set[int] = {
-        int(row_course.id)
-        for _selection, _offering, row_course in existing_active_rows
-        if row_course and row_course.id is not None
-    }
-    existing_active_payloads = [
-        _serialize_offering_payload(row_offering, row_course)
-        for _selection, row_offering, row_course in existing_active_rows
-    ]
-
-    conflict_reason = ""
-    has_timetable_conflict = False
-    if bool(getattr(policy, "strict_conflict_check", True)) and existing_active_payloads:
-        conflicts = validate_schedule_conflicts(
-            student_id=profile.student_user_id,
-            term_id=f"{offering.academic_year_label}:{offering.semester}",
-            selected_offerings=[_serialize_offering_payload(offering, course)],
-            existing_active_selections=existing_active_payloads,
-        )
-        if conflicts:
-            has_timetable_conflict = True
-            first = conflicts[0] or {}
-            first_other = str(first.get("conflicting_course") or "another course").strip()
-            first_day = str(first.get("day") or "-").strip()
-            first_time = str(first.get("time") or "-").strip()
-            conflict_reason = f"Schedule conflict with {first_other} on {first_day} at {first_time}"
-
-    if not (
-        str(getattr(offering, "day_of_week", "") or "").strip()
-        and str(getattr(offering, "start_time", "") or "").strip()
-        and str(getattr(offering, "end_time", "") or "").strip()
-    ):
-        additional_blockers.append(f"Offering {offering.id} has an incomplete timetable")
-
-    if seat_snapshot and not bool(seat_snapshot.get("is_open", True)):
-        additional_blockers.append(f"Section {offering.section or offering.id} is closed or full")
-
-    projected_total_credits = float(current_term_registered_hours or 0.0) + float(course.credit_hours or 0.0)
-    return evaluate_course_eligibility(
-        {
-            "current_year": profile.current_study_year,
-            "gpa": float(current_gpa or 0.0),
-            "earned_hours": float(getattr(profile, "passed_hours", 0.0) or 0.0),
-        },
-        {
-            "id": course.id,
-            "code": course.code,
-            "year": course.study_year if course.study_year is not None else profile.current_study_year,
-        },
-        {
-            "prerequisites_satisfied": prerequisites_satisfied,
-            "prerequisite_reason": prerequisite_reason,
-            "already_passed": course.id is not None and int(course.id) in passed_course_ids,
-            "already_registered_same_term": course.id is not None and int(course.id) in existing_active_course_ids,
-            "offered_this_term": bool(offering.is_active and offering.academic_year_label and offering.semester),
-            "has_timetable_conflict": has_timetable_conflict,
-            "conflict_reason": conflict_reason,
-            "projected_total_credits": projected_total_credits,
-            "additional_blockers": additional_blockers,
-        },
-        policy,
-    )
-
-
 def _normalize_section_match_token(value: Any) -> str:
     return (
         str(value or "")
@@ -1402,109 +1223,6 @@ def _normalize_section_match_token(value: Any) -> str:
         .replace("_", "")
         .replace(" ", "")
     )
-
-
-def _evaluate_selected_offerings_workflow(
-    db: Session,
-    *,
-    req: RegistrationRequest,
-    offering_ids: list[int],
-    profile: StudentAcademicProfile,
-    policy: RegistrationEligibilityPolicy,
-) -> dict[str, Any]:
-    offerings = (
-        db.query(CourseOffering)
-        .filter(CourseOffering.id.in_([int(item) for item in offering_ids]))
-        .all()
-        if offering_ids
-        else []
-    )
-    offerings_by_id = {int(item.id): item for item in offerings if item and item.id is not None}
-    courses = (
-        db.query(CourseCatalog)
-        .filter(CourseCatalog.id.in_([int(item.course_id) for item in offerings if item and item.course_id is not None]))
-        .all()
-        if offerings
-        else []
-    )
-    course_by_id = {int(item.id): item for item in courses if item and item.id is not None}
-    passed_course_ids, grades_by_course = _build_passed_course_sets(db, req.student_user_id)
-    existing_active_rows = _existing_term_registration_rows(
-        db,
-        student_user_id=req.student_user_id,
-        academic_year_label=req.academic_year_label,
-        semester=req.semester,
-        exclude_request_id=req.id,
-    )
-    current_gpa = _calculate_effective_gpa(db, profile)
-    current_term_registered_hours = sum(
-        float(row_course.credit_hours or 0.0)
-        for _selection, _offering, row_course in existing_active_rows
-        if row_course is not None
-    )
-    evaluations: list[dict[str, Any]] = []
-    projected_total_credits = current_term_registered_hours
-    for offering_id in [int(item) for item in offering_ids]:
-        offering = offerings_by_id.get(offering_id)
-        if not offering:
-            continue
-        course = course_by_id.get(int(offering.course_id))
-        if course is not None:
-            projected_total_credits += float(course.credit_hours or 0.0)
-    for offering_id in [int(item) for item in offering_ids]:
-        offering = offerings_by_id.get(offering_id)
-        if not offering:
-            continue
-        course = course_by_id.get(int(offering.course_id))
-        evaluation = _evaluate_offering_eligibility_for_student(
-            db,
-            offering=offering,
-            course=course,
-            profile=profile,
-            current_gpa=current_gpa,
-            policy=policy,
-            passed_course_ids=passed_course_ids,
-            grades_by_course=grades_by_course,
-            existing_active_rows=existing_active_rows,
-            current_term_registered_hours=projected_total_credits - float(course.credit_hours or 0.0) if course else projected_total_credits,
-            seat_snapshot={"is_open": True},
-        )
-        evaluations.append(
-            {
-                "offering_id": offering_id,
-                "course_id": int(course.id) if course else None,
-                "course_code": course.code if course else None,
-                "status": evaluation["status"],
-                "reasons": evaluation["reasons"],
-                "warnings": evaluation["warnings"],
-            }
-        )
-
-    blocked = [item for item in evaluations if item["status"] == ELIGIBILITY_BLOCKED]
-    if blocked:
-        first = blocked[0]
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "REGISTRATION_BLOCKED",
-                "message": f"Course {first.get('course_code') or first.get('offering_id')} is blocked",
-                "items": evaluations,
-            },
-        )
-
-    final_status = "registered"
-    if projected_total_credits > float(getattr(policy, "max_credits_normal", 18) or 18):
-        final_status = "advisor_requested"
-    if any(item["status"] == ELIGIBILITY_ADVISOR_REQUIRED for item in evaluations):
-        final_status = "advisor_requested"
-    if any(item["status"] == ELIGIBILITY_ADMIN_OVERRIDE for item in evaluations):
-        final_status = "admin_override_pending"
-
-    return {
-        "status": final_status,
-        "items": evaluations,
-        "projected_total_credits": projected_total_credits,
-    }
 
 
 def _strict_validate_selection_context(
@@ -2134,44 +1852,6 @@ async def my_credit_policy(db: Session = Depends(get_db), current_user: User = D
         "allowed_credit_hours": {"min": int(limits[0]), "max": int(limits[1])},
         "tiers": [CreditPolicyTierResponse.model_validate(item).model_dump(mode="json") for item in tiers],
     }
-
-
-@router.get("/registration/eligibility-policy", response_model=RegistrationEligibilityPolicyResponse)
-async def get_registration_eligibility_policy(
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-):
-    return _get_registration_eligibility_policy(db)
-
-
-@router.put(
-    "/registration/eligibility-policy",
-    response_model=RegistrationEligibilityPolicyResponse,
-    dependencies=[Depends(require_role("admin"))],
-)
-async def update_registration_eligibility_policy(
-    payload: RegistrationEligibilityPolicyUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    row = _get_registration_eligibility_policy(db)
-    before = RegistrationEligibilityPolicyResponse.model_validate(row).model_dump(mode="json")
-    patch = payload.model_dump(exclude_unset=True)
-    for key, value in patch.items():
-        setattr(row, key, value)
-    db.add(row)
-    _log_audit(
-        db,
-        current_user.id,
-        "registration_eligibility_policy",
-        str(row.id),
-        "update",
-        before,
-        patch,
-    )
-    db.commit()
-    db.refresh(row)
-    return row
 
 
 @router.post("/colleges/{college_id}/tracks", response_model=TrackResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_role("admin"))])
@@ -2962,10 +2642,7 @@ async def get_current_period_status(
 async def my_available_offerings(academic_year_label: str, semester: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Students only")
-    ensure_academic_core_schema(db)
     profile = _get_student_profile(db, current_user.id)
-    policy = _get_registration_eligibility_policy(db)
-    current_gpa = _calculate_effective_gpa(db, profile)
     offerings = db.query(CourseOffering).filter(CourseOffering.academic_year_label == academic_year_label, CourseOffering.semester == semester, CourseOffering.is_active == True).all()  # noqa: E712
     capacity_snapshot = _section_capacity_snapshot(db, [int(item.id) for item in offerings])
     passed_course_ids, grades_by_course = _build_passed_course_sets(db, current_user.id)
@@ -2975,34 +2652,28 @@ async def my_available_offerings(academic_year_label: str, semester: str, db: Se
         academic_year_label=academic_year_label,
         semester=semester,
     )
-    existing_active_rows = _existing_term_registration_rows(
-        db,
-        student_user_id=current_user.id,
-        academic_year_label=academic_year_label,
-        semester=semester,
-    )
-    current_term_registered_hours = sum(
-        float(course.credit_hours or 0.0)
-        for _selection, _offering, course in existing_active_rows
-        if course is not None
-    )
     items: list[dict[str, Any]] = []
+    excluded_incomplete_schedule = 0
     for offering in offerings:
         seat = capacity_snapshot.get(int(offering.id), {})
         course = db.query(CourseCatalog).filter(CourseCatalog.id == offering.course_id).first()
-        evaluation = _evaluate_offering_eligibility_for_student(
+        eligibility_status, eligibility_reason = _offering_eligibility_for_student(
             db,
             offering=offering,
             course=course,
             profile=profile,
-            current_gpa=current_gpa,
-            policy=policy,
             passed_course_ids=passed_course_ids,
             grades_by_course=grades_by_course,
-            existing_active_rows=existing_active_rows,
-            current_term_registered_hours=current_term_registered_hours,
+            selected_offering_ids=selected_offering_ids,
             seat_snapshot=seat,
         )
+        if eligibility_status == "hidden_invalid":
+            continue
+        if eligibility_status == "locked_schedule":
+            excluded_incomplete_schedule += 1
+            continue
+        if eligibility_status not in {"open", "selected"}:
+            continue
         items.append(
             {
                 "offering_id": offering.id,
@@ -3017,10 +2688,8 @@ async def my_available_offerings(academic_year_label: str, semester: str, db: Se
                 "available_seats": seat.get("available_seats"),
                 "is_open": bool(seat.get("is_open", True)),
                 "section_status": seat.get("section_status", "OPEN"),
-                "eligibility_status": evaluation["status"],
-                "eligibility_reasons": evaluation["reasons"],
-                "eligibility_warnings": evaluation["warnings"],
-                "eligibility_reason": (evaluation["reasons"][0] if evaluation["reasons"] else None),
+                "eligibility_status": eligibility_status,
+                "eligibility_reason": eligibility_reason,
                 "is_selected": int(offering.id) in selected_offering_ids,
                 "day_of_week": offering.day_of_week,
                 "start_time": offering.start_time,
@@ -3041,7 +2710,7 @@ async def my_available_offerings(academic_year_label: str, semester: str, db: Se
         semester,
         len(items),
         missing_schedule_count,
-        0,
+        excluded_incomplete_schedule,
     )
     return {"items": items}
 
@@ -3058,10 +2727,7 @@ async def offerings_for_student(
     if not _can_manage_student_profile(db, student_user_id, current_user):
         raise HTTPException(status_code=403, detail="You cannot manage this student")
 
-    ensure_academic_core_schema(db)
     profile = _get_student_profile(db, student_user_id)
-    policy = _get_registration_eligibility_policy(db)
-    current_gpa = _calculate_effective_gpa(db, profile)
     period = _term_window(
         db,
         college_id=profile.college_id,
@@ -3086,35 +2752,27 @@ async def offerings_for_student(
         academic_year_label=academic_year_label,
         semester=semester,
     )
-    existing_active_rows = _existing_term_registration_rows(
-        db,
-        student_user_id=student_user_id,
-        academic_year_label=academic_year_label,
-        semester=semester,
-    )
-    current_term_registered_hours = sum(
-        float(course.credit_hours or 0.0)
-        for _selection, _offering, course in existing_active_rows
-        if course is not None
-    )
     items: list[dict[str, Any]] = []
+    excluded_incomplete_schedule = 0
     for offering in offerings:
         seat = capacity_snapshot.get(int(offering.id), {})
         course = db.query(CourseCatalog).filter(CourseCatalog.id == offering.course_id).first()
-        evaluation = _evaluate_offering_eligibility_for_student(
+        eligibility_status, eligibility_reason = _offering_eligibility_for_student(
             db,
             offering=offering,
             course=course,
             profile=profile,
-            current_gpa=current_gpa,
-            policy=policy,
             passed_course_ids=passed_course_ids,
             grades_by_course=grades_by_course,
-            existing_active_rows=existing_active_rows,
-            current_term_registered_hours=current_term_registered_hours,
+            selected_offering_ids=selected_offering_ids,
             seat_snapshot=seat,
         )
-        if open_only and evaluation["status"] == ELIGIBILITY_BLOCKED:
+        if eligibility_status == "hidden_invalid":
+            continue
+        if eligibility_status == "locked_schedule":
+            excluded_incomplete_schedule += 1
+            continue
+        if open_only and eligibility_status not in {"open", "selected"}:
             continue
         items.append(
             {
@@ -3130,10 +2788,8 @@ async def offerings_for_student(
                 "available_seats": seat.get("available_seats"),
                 "is_open": bool(seat.get("is_open", True)),
                 "section_status": seat.get("section_status", "OPEN"),
-                "eligibility_status": evaluation["status"],
-                "eligibility_reasons": evaluation["reasons"],
-                "eligibility_warnings": evaluation["warnings"],
-                "eligibility_reason": (evaluation["reasons"][0] if evaluation["reasons"] else None),
+                "eligibility_status": eligibility_status,
+                "eligibility_reason": eligibility_reason,
                 "is_selected": int(offering.id) in selected_offering_ids,
                 "day_of_week": offering.day_of_week,
                 "start_time": offering.start_time,
@@ -3156,7 +2812,7 @@ async def offerings_for_student(
         len(items),
         bool(open_only),
         missing_schedule_count,
-        0,
+        excluded_incomplete_schedule,
     )
     return {"items": items}
 
@@ -3165,12 +2821,9 @@ async def offerings_for_student(
 async def submit_registration(payload: RegistrationSubmit, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Students only")
-    ensure_academic_core_schema(db)
     profile = _get_student_profile(db, current_user.id)
-    eligibility_policy = _get_registration_eligibility_policy(db)
     effective_advisor_user_id = _resolve_effective_student_advisor_id(db, profile)
-    effective_admin_user_id = _resolve_fallback_admin_user_id(db)
-    effective_reviewer_user_id = effective_advisor_user_id or effective_admin_user_id
+    effective_reviewer_user_id = effective_advisor_user_id or _resolve_fallback_admin_user_id(db)
     if not effective_reviewer_user_id:
         raise HTTPException(status_code=400, detail="ظ„ط§ ظٹظˆط¬ط¯ ظ…ط±ط´ط¯ ط£ظƒط§ط¯ظٹظ…ظٹ ط£ظˆ ط£ط¯ظ…ظ† ظ…طھط§ط­ ظ„ط§ط³طھظ„ط§ظ… ط§ظ„ط·ظ„ط¨.")
     window = _term_window(
@@ -3224,20 +2877,9 @@ async def submit_registration(payload: RegistrationSubmit, db: Session = Depends
         actor_mode="self_submit",
         selection_context=payload.selection_context,
     )
-    workflow_decision = _evaluate_selected_offerings_workflow(
-        db,
-        req=req,
-        offering_ids=payload.offering_ids,
-        profile=profile,
-        policy=eligibility_policy,
-    )
-    req.status = workflow_decision["status"]
-    if req.status == "advisor_requested":
-        req.advisor_user_id = effective_reviewer_user_id
-    elif req.status == "admin_override_pending":
-        req.advisor_user_id = effective_admin_user_id or effective_reviewer_user_id
-    else:
-        req.advisor_user_id = None
+    # Student "save registration" goes directly to advisor queue.
+    req.status = "advisor_requested"
+    req.advisor_user_id = effective_reviewer_user_id
     req.submitted_via = "self"
     req.is_after_window = False
     req.submitted_at = _now()
@@ -3246,11 +2888,6 @@ async def submit_registration(payload: RegistrationSubmit, db: Session = Depends
     req.advisor_note = None
     req.handled_at = None
     req.processed_by_user_id = None
-    req.advisor_approved_at = None
-    if req.status == "registered":
-        req.advisor_approved_at = _now()
-        req.handled_at = _now()
-        req.processed_by_user_id = current_user.id
 
     if req.advisor_user_id:
         notif = SystemNotification(
@@ -3271,7 +2908,6 @@ async def submit_registration(payload: RegistrationSubmit, db: Session = Depends
             "offering_ids": payload.offering_ids,
             "selected_credit_hours": total_credit_hours,
             "allowed_credit_hours": {"min": min_credits, "max": max_credits},
-            "workflow_decision": workflow_decision,
         },
     )
     db.commit()
@@ -3827,7 +3463,7 @@ async def advisor_register_request(
     period_status = _effective_window_status(period)
     if period_status not in {"OPEN", "PENDING_REVIEW"}:
         raise HTTPException(status_code=400, detail=f"Register action is blocked. Registration period status is {period_status}")
-    if req.status not in {"advisor_requested", "advisor_approved", "need_info", "admin_override_approved"}:
+    if req.status not in {"advisor_requested", "advisor_approved", "need_info"}:
         raise HTTPException(status_code=400, detail="Request is not in a registrable advisor state")
 
     selection_ids = [
@@ -4500,11 +4136,9 @@ async def patch_registration_status(request_id: int, payload: RegistrationStatus
     if payload.status == "advisor_approved":
         req.advisor_user_id = current_user.id
         req.advisor_approved_at = _now()
-    if payload.status in {"advisor_rejected", "rejected", "need_info", "admin_override_approved", "admin_override_rejected", "registered"}:
+    if payload.status in {"rejected", "need_info", "registered"}:
         req.processed_by_user_id = current_user.id
         req.handled_at = _now()
-    if payload.status == "admin_override_approved":
-        req.advisor_user_id = current_user.id
     if payload.status == "locked":
         req.locked_at = _now()
     _log_audit(db, current_user.id, "registration_request", str(req.id), "status_change", None, payload.model_dump())
