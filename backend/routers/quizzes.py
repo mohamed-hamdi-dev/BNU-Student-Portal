@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import uuid
 
@@ -38,6 +38,19 @@ def _to_utc(dt: datetime | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def _infer_question_type(q: dict) -> str:
+    """Infer question type for old data that was saved without a 'type' field."""
+    if "type" in q and q["type"]:
+        return q["type"]
+    correct = q.get("correct")
+    if isinstance(correct, list):
+        return "multiple_select"
+    options = q.get("options", [])
+    if len(options) == 2 and set(o.strip() for o in options) in ({"صح", "خطأ"}, {"true", "false"}, {"True", "False"}):
+        return "true_false"
+    return "multiple_choice"
+
+
 def _serialize_quiz(quiz: Quiz) -> QuizResponse:
     try:
         questions = json.loads(quiz.questions_json or "[]")
@@ -45,6 +58,11 @@ def _serialize_quiz(quiz: Quiz) -> QuizResponse:
             questions = []
     except json.JSONDecodeError:
         questions = []
+
+    # Enrich old questions that are missing the 'type' field
+    for q in questions:
+        if isinstance(q, dict) and not q.get("type"):
+            q["type"] = _infer_question_type(q)
 
     return QuizResponse(
         id=quiz.id,
@@ -93,11 +111,12 @@ def _submission_status(submission: QuizSubmission, quiz: Quiz | None) -> str:
     return "late" if submission.submitted_at > quiz.end_time else "on_time"
 
 
-def _serialize_submission(submission: QuizSubmission, quiz: Quiz | None) -> QuizSubmissionResponse:
+def _serialize_submission(submission: QuizSubmission, quiz: Quiz | None, student_username: str | None = None) -> QuizSubmissionResponse:
     return QuizSubmissionResponse(
         id=submission.id,
         quizId=submission.quiz_id,
         studentId=submission.student_id,
+        studentUsername=student_username or str(submission.student_id),
         studentName=submission.student_name,
         quizTitle=submission.quiz_title,
         courseCode=submission.course_code,
@@ -290,10 +309,14 @@ async def submit_quiz(
         else:
             correct_count = 0
             for index, question in enumerate(questions):
-                expected = int(question.get("correct", 0))
+                expected = question.get("correct", 0)
                 submitted = answers.get(str(index), answers.get(index))
-                if submitted is not None and int(submitted) == expected:
-                    correct_count += 1
+                if isinstance(expected, list):
+                    if isinstance(submitted, list) and set(expected) == set(submitted):
+                        correct_count += 1
+                else:
+                    if submitted is not None and not isinstance(submitted, list) and int(submitted) == int(expected):
+                        correct_count += 1
             score = round((correct_count / len(questions)) * 100)
 
     safe_score = max(0, min(100, int(score)))
@@ -322,7 +345,7 @@ async def submit_quiz(
 
     db.commit()
     db.refresh(submission)
-    return _serialize_submission(submission, quiz)
+    return _serialize_submission(submission, quiz, current_user.username)
 
 
 @router.get("/my-results", response_model=list[QuizSubmissionResponse])
@@ -338,7 +361,7 @@ async def my_results(
     ).order_by(QuizSubmission.submitted_at.desc()).all()
 
     quiz_map = {q.id: q for q in db.query(Quiz).filter(Quiz.id.in_([r.quiz_id for r in results])).all()} if results else {}
-    return [_serialize_submission(item, quiz_map.get(item.quiz_id)) for item in results]
+    return [_serialize_submission(item, quiz_map.get(item.quiz_id), current_user.username) for item in results]
 
 
 @router.get("/submissions", response_model=list[QuizSubmissionResponse], dependencies=[Depends(require_role("admin", "doctor"))])
@@ -347,7 +370,7 @@ async def list_submissions(
     current_user: User = Depends(get_current_user),
 ):
     query = (
-        db.query(QuizSubmission, Quiz)
+        db.query(QuizSubmission, Quiz, User.username)
         .join(Quiz, Quiz.id == QuizSubmission.quiz_id)
         .join(User, User.id == QuizSubmission.student_id)
         .filter(User.role == "student")
@@ -356,7 +379,7 @@ async def list_submissions(
         query = query.filter(Quiz.created_by == current_user.id)
 
     rows = query.order_by(QuizSubmission.submitted_at.desc()).all()
-    return [_serialize_submission(submission, quiz) for submission, quiz in rows]
+    return [_serialize_submission(submission, quiz, username) for submission, quiz, username in rows]
 
 
 @router.get("/submissions/query", response_model=QuizSubmissionsPageResponse, dependencies=[Depends(require_role("admin", "doctor"))])
@@ -380,7 +403,7 @@ async def query_submissions(
     cutoff = datetime.now(timezone.utc) - timedelta(days=ARCHIVE_DAYS_DEFAULT)
 
     query = (
-        db.query(QuizSubmission, Quiz)
+        db.query(QuizSubmission, Quiz, User.username)
         .join(Quiz, Quiz.id == QuizSubmission.quiz_id)
         .join(User, User.id == QuizSubmission.student_id)
         .filter(User.role == "student")
@@ -413,11 +436,11 @@ async def query_submissions(
 
     rows = query.all()
     filtered_rows = []
-    for submission, quiz in rows:
+    for submission, quiz, username in rows:
         status_value = _submission_status(submission, quiz)
         if status_filter in {"on_time", "late"} and status_value != status_filter:
             continue
-        filtered_rows.append((submission, quiz, status_value))
+        filtered_rows.append((submission, quiz, status_value, username))
 
     sort_key_map = {
         "score": lambda item: item[0].score,
@@ -435,10 +458,10 @@ async def query_submissions(
     end = start + page_size
     page_items = filtered_rows[start:end]
 
-    items = [_serialize_submission(submission, quiz) for submission, quiz, _ in page_items]
+    items = [_serialize_submission(submission, quiz, username) for submission, quiz, _, username in page_items]
     summary = {
-        "on_time": sum(1 for _, _, st in filtered_rows if st == "on_time"),
-        "late": sum(1 for _, _, st in filtered_rows if st == "late"),
+        "on_time": sum(1 for _, _, st, _ in filtered_rows if st == "on_time"),
+        "late": sum(1 for _, _, st, _ in filtered_rows if st == "late"),
         "average_score": round(sum(item[0].score for item in filtered_rows) / total, 2) if total else 0,
     }
 

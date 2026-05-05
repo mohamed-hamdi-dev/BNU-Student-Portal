@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Sunrise, Sun, Moon, GraduationCap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -80,7 +80,7 @@ export default function HerobanerPortal() {
   const displayName = user?.name || t("no_user_found");
 
   return (
-    <div className="HeroPortal container relative mx-auto mb-[5em] w-full max-w-[1200px]" dir="rtl">
+    <div className="HeroPortal container relative mx-auto mb-[5em] w-full max-w-[1200px]" dir={isAr ? "rtl" : "ltr"}>
       <div className="group relative h-[420px] w-full overflow-hidden rounded-[2.2em] shadow-2xl sm:h-[470px]">
         <div className="absolute inset-0 z-0">
           {heroSlides.map((src, index) => (
@@ -139,7 +139,7 @@ export default function HerobanerPortal() {
           </div>
         </div>
 
-        <div className="absolute bottom-7 left-8 hidden opacity-60 md:block">
+        <div className={`absolute bottom-7 hidden opacity-60 md:block ${isAr ? "left-8" : "right-8"}`}>
           <span className="text-[10px] font-bold uppercase tracking-[0.38em] text-white">
             {t("hero_innovation_excellence", {
               defaultValue: isAr ? "الابتكار والتميز" : "Innovation & Excellence",

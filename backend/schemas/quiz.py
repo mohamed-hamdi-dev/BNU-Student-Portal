@@ -5,9 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class QuizQuestion(BaseModel):
+    type: str = "multiple_choice"
     question: str
     options: List[str]
-    correct: int = 0
+    correct: int | List[int] = 0
     image_url: str | None = Field(default=None, alias="imageUrl")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -47,7 +48,7 @@ class QuizResponse(BaseModel):
 
 
 class QuizSubmissionCreate(BaseModel):
-    answers: Dict[str, int] | None = None
+    answers: Dict[str, int | List[int]] | None = None
     score: int | None = None
 
 
@@ -55,6 +56,7 @@ class QuizSubmissionResponse(BaseModel):
     id: str
     quiz_id: str = Field(alias="quizId")
     student_id: int = Field(alias="studentId")
+    student_username: str | None = Field(default=None, alias="studentUsername")
     student_name: str = Field(alias="studentName")
     quiz_title: str = Field(alias="quizTitle")
     course_code: str | None = Field(default=None, alias="courseCode")
@@ -77,3 +79,4 @@ class QuizSubmissionsPageResponse(BaseModel):
     summary: dict = {}
 
     model_config = ConfigDict(populate_by_name=True)
+

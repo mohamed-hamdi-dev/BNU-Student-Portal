@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { BookOpen, Users, ClipboardList, PlusCircle, CheckCircle, Trash2, Calendar, Clock, ChevronLeft, Filter, ImagePlus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { createQuiz, deleteQuiz, listQuizzesScoped, queryQuizSubmissions, updateQuiz } from "../../services/quizApi";
@@ -150,19 +150,21 @@ const safeJsonParse = (raw, fallback) => {
 };
 
 const normalizeQuestion = (item = {}) => {
-  const options = Array.isArray(item?.options) ? item.options.map((opt) => String(opt ?? "")) : ["", "", "", ""];
+  const type = String(item?.type || "multiple_choice");
+  const options = Array.isArray(item?.options) ? item.options.map((opt) => String(opt ?? "")) : (type === "true_false" ? ["صح", "خطأ"] : ["", "", "", ""]);
   const imageUrl = String(item?.imageUrl ?? item?.image_url ?? "").trim();
   return {
+    type,
     question: String(item?.question ?? "").trim(),
-    options: options.length === 4 ? options : [...options, "", "", "", ""].slice(0, 4),
-    correct: Number(item?.correct ?? 0) || 0,
+    options: type === "true_false" ? ["صح", "خطأ"] : options.filter(opt => opt.trim() !== ""),
+    correct: type === "multiple_select" ? (Array.isArray(item?.correct) ? item.correct : []) : (Number(item?.correct ?? 0) || 0),
     imageUrl,
   };
 };
 
 const AdminAddQuiz = ({ onSave, onCancel, initialQuiz, adminCollegeId, isSuperAdmin, openCourseOptions, academicYearOptions, managedColleges = [] }) => {
   const [form, setForm] = useState(emptyForm);
-  const [q, setQ] = useState({ question: "", options: ["", "", "", ""], correct: 0, imageUrl: "" });
+  const [q, setQ] = useState({ type: "multiple_choice", question: "", options: ["", "", "", ""], correct: 0, imageUrl: "" });
   const [saving, setSaving] = useState(false);
   const collegeOptions = useMemo(() => {
     const optionsMap = new Map();
@@ -313,10 +315,10 @@ const AdminAddQuiz = ({ onSave, onCancel, initialQuiz, adminCollegeId, isSuperAd
     if (!q.question && !q.imageUrl) return;
     const nextQuestion = normalizeQuestion({
       ...q,
-      options: Array.isArray(q.options) ? [...q.options] : ["", "", "", ""],
+      options: Array.isArray(q.options) ? [...q.options] : (q.type === "true_false" ? ["صح", "خطأ"] : ["", "", "", ""]),
     });
     setForm((prev) => ({ ...prev, questions: [...prev.questions, nextQuestion] }));
-    setQ({ question: "", options: ["", "", "", ""], correct: 0, imageUrl: "" });
+    setQ({ type: q.type, question: "", options: q.type === "true_false" ? ["صح", "خطأ"] : ["", "", "", ""], correct: q.type === "multiple_select" ? [] : 0, imageUrl: "" });
   };
 
   const handleQuestionImageFile = (file) => {
@@ -367,6 +369,7 @@ const AdminAddQuiz = ({ onSave, onCancel, initialQuiz, adminCollegeId, isSuperAd
         questions: (Array.isArray(form.questions) ? form.questions : []).map((item) => {
           const normalized = normalizeQuestion(item);
           return {
+            type: normalized.type,
             question: normalized.question,
             options: normalized.options,
             correct: normalized.correct,
@@ -515,9 +518,31 @@ const AdminAddQuiz = ({ onSave, onCancel, initialQuiz, adminCollegeId, isSuperAd
         </div>
 
         <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-6">
-          <h3 className="flex items-center gap-2 font-black text-slate-700">
-            <PlusCircle size={18} className="text-cyan-600" /> اضافة سؤال
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 font-black text-slate-700">
+              <PlusCircle size={18} className="text-cyan-600" /> اضافة سؤال
+            </h3>
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-bold text-slate-500">نوع السؤال:</label>
+              <select
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold text-slate-700 outline-none"
+                value={q.type}
+                onChange={(e) => {
+                  const type = e.target.value;
+                  setQ({
+                    ...q,
+                    type,
+                    options: type === "true_false" ? ["صح", "خطأ"] : ["", "", "", ""],
+                    correct: type === "multiple_select" ? [] : 0,
+                  });
+                }}
+              >
+                <option value="multiple_choice">اختيار من متعدد</option>
+                <option value="multiple_select">تحديد متعدد (أكثر من إجابة)</option>
+                <option value="true_false">صح أم خطأ</option>
+              </select>
+            </div>
+          </div>
           <textarea
             className="min-h-[100px] w-full rounded-2xl bg-white p-4 outline-none"
             value={q.question}
@@ -557,24 +582,63 @@ const AdminAddQuiz = ({ onSave, onCancel, initialQuiz, adminCollegeId, isSuperAd
               </div>
             ) : null}
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className={`grid grid-cols-1 gap-3 ${q.type === "true_false" ? "md:grid-cols-2" : "md:grid-cols-2"}`}>
             {q.options.map((opt, i) => (
-              <div key={i} className={`relative flex items-center rounded-2xl border bg-white p-2 ${q.correct === i ? "border-cyan-500" : "border-transparent"}`}>
+              <div key={i} className={`relative flex items-center rounded-2xl border bg-white p-2 ${(Array.isArray(q.correct) ? q.correct.includes(i) : q.correct === i) ? "border-cyan-500" : "border-transparent"}`}>
                 <input
                   type="text"
-                  className="w-full bg-transparent p-3 pr-10 outline-none"
-                  placeholder={`اختيار ${i + 1}`}
+                  className={`w-full bg-transparent p-3 pr-10 outline-none ${(q.type === "multiple_choice" || q.type === "multiple_select") && q.options.length > 2 ? "pl-10" : ""}`}
+                  placeholder={q.type === "true_false" ? opt : `اختيار ${i + 1}`}
                   value={opt}
+                  readOnly={q.type === "true_false"}
                   onChange={(e) => {
+                    if (q.type === "true_false") return;
                     const n = [...q.options];
                     n[i] = e.target.value;
                     setQ({ ...q, options: n });
                   }}
                 />
-                <input type="radio" name="correct" className="absolute right-3 h-4 w-4 accent-cyan-600" checked={q.correct === i} onChange={() => setQ({ ...q, correct: i })} />
+                {q.type === "multiple_select" ? (
+                  <input type="checkbox" className="absolute right-3 h-4 w-4 accent-cyan-600" checked={Array.isArray(q.correct) && q.correct.includes(i)} onChange={(e) => {
+                    const current = Array.isArray(q.correct) ? q.correct : [];
+                    if (e.target.checked) setQ({ ...q, correct: [...current, i] });
+                    else setQ({ ...q, correct: current.filter(c => c !== i) });
+                  }} />
+                ) : (
+                  <input type="radio" name="correct" className="absolute right-3 h-4 w-4 accent-cyan-600" checked={q.correct === i} onChange={() => setQ({ ...q, correct: i })} />
+                )}
+                {(q.type === "multiple_choice" || q.type === "multiple_select") && q.options.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const n = q.options.filter((_, idx) => idx !== i);
+                      let newCorrect = q.correct;
+                      if (q.type === "multiple_select" && Array.isArray(q.correct)) {
+                         newCorrect = q.correct.filter(c => c !== i).map(c => c > i ? c - 1 : c);
+                      } else if (q.correct === i) {
+                         newCorrect = 0;
+                      } else if (q.correct > i) {
+                         newCorrect = q.correct - 1;
+                      }
+                      setQ({ ...q, options: n, correct: newCorrect });
+                    }}
+                    className="absolute left-3 rounded-full bg-rose-50 p-1 text-rose-500 hover:bg-rose-100"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
+          {(q.type === "multiple_choice" || q.type === "multiple_select") && (
+            <button
+              type="button"
+              onClick={() => setQ({ ...q, options: [...q.options, ""] })}
+              className="mt-2 text-sm font-bold text-cyan-600 hover:text-cyan-700"
+            >
+              + اضافة خيار جديد
+            </button>
+          )}
           <button onClick={addQuestion} className="w-full rounded-2xl bg-slate-900 py-4 font-black text-white">تثبيت السؤال</button>
         </div>
 
@@ -583,7 +647,10 @@ const AdminAddQuiz = ({ onSave, onCancel, initialQuiz, adminCollegeId, isSuperAd
             {form.questions.map((item, index) => (
               <div key={`${item.question || "q"}-${index}`} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-700">{index + 1}. {item.question || "سؤال بصورة فقط"}</p>
+                  <p className="truncate text-sm font-bold text-slate-700">
+                    <span className="text-cyan-600 ml-1">[{item.type === "true_false" ? "صح/خطأ" : item.type === "multiple_select" ? "متعدد الإجابات" : "اختياري"}]</span>
+                    {index + 1}. {item.question || "سؤال بصورة فقط"}
+                  </p>
                   {item.imageUrl || item.image_url ? <p className="mt-1 text-[11px] font-bold text-cyan-600">يتضمن صورة</p> : null}
                 </div>
                 <button
@@ -905,7 +972,7 @@ export default function AdminQuiz() {
                     <tr key={s.id}>
                       <td className="p-3">
                         <p className="font-bold text-slate-800">{s.studentName}</p>
-                        <p className="text-xs text-slate-400">{s.studentId}</p>
+                        <p className="text-xs text-slate-400">{s.studentUsername || s.studentId}</p>
                       </td>
                       <td className="p-3 text-slate-700">{s.courseCode || "-"}</td>
                       <td className="p-3 font-bold text-slate-700">{s.quizTitle}</td>

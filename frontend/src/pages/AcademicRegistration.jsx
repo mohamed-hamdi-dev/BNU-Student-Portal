@@ -271,13 +271,13 @@ const App = () => {
     const effectiveMinHours = Number((policyHoursLimit?.min ?? 0) > 0 ? policyHoursLimit.min : fallbackMinHoursByGpa);
     const scheduleDayMeta = useMemo(
         () => [
+            { key: "saturday", ar: "السبت", en: "Saturday", label: "Saturday" },
             { key: "sunday", ar: "الأحد", en: "Sunday", label: t("academic_reg_day_sunday") },
             { key: "monday", ar: "الاثنين", en: "Monday", label: t("academic_reg_day_monday") },
             { key: "tuesday", ar: "الثلاثاء", en: "Tuesday", label: t("academic_reg_day_tuesday") },
             { key: "wednesday", ar: "الأربعاء", en: "Wednesday", label: t("academic_reg_day_wednesday") },
             { key: "thursday", ar: "الخميس", en: "Thursday", label: t("academic_reg_day_thursday") },
             { key: "friday", ar: "الجمعة", en: "Friday", label: "Friday" },
-            { key: "saturday", ar: "السبت", en: "Saturday", label: "Saturday" },
         ],
         [t]
     );
@@ -2194,8 +2194,8 @@ const App = () => {
                                                         className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-medium ${item.palette.surface} ${item.palette.border} text-slate-700`}
                                                     >
                                                         <span className={`h-2.5 w-2.5 rounded-full ${item.palette.chip.split(" ")[0]}`}></span>
-                                                        <span className="text-slate-800">{item.id}</span>
-                                                        <span className="text-slate-500">{item.name}</span>
+                                                        <span className="!text-slate-900 font-bold">{item.id}</span>
+                                                        <span className="!text-slate-900 font-bold">{item.name}</span>
                                                     </div>
                                                 ))}
                                             </div>

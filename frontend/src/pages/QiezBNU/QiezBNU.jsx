@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Navbar from "../../layout/Navbar";
 import { listMyQuizResults, listQuizzes, submitQuiz } from "../../services/quizApi";
 import { useTranslation } from "react-i18next";
@@ -33,7 +33,13 @@ const QuizRunner = ({ quiz, onFinish }) => {
     finishCalledRef.current = true;
     let score = 0;
     quiz.questions.forEach((q, i) => {
-      if (ans[i] === q.correct) score++;
+      if (q.type === "multiple_select") {
+        const expected = Array.isArray(q.correct) ? q.correct : [];
+        const submitted = Array.isArray(ans[i]) ? ans[i] : [];
+        if (expected.length === submitted.length && expected.every(x => submitted.includes(x))) score++;
+      } else {
+        if (ans[i] === q.correct) score++;
+      }
     });
     onFinish({
       quizId: quiz.id,
@@ -162,22 +168,7 @@ const QuizRunner = ({ quiz, onFinish }) => {
         </div>
 
         <div className="grid grid-cols-1 gap-4">
-          {currentQuestion.options.map((o, i) => (
-            <button
-              key={i}
-              onClick={() => setAns({ ...ans, [idx]: i })}
-              className={`group w-full p-6 rounded-[24px] border-2 text-right transition-all duration-300 flex items-center justify-between ${
-                ans[idx] === i 
-                ? "border-cyan-500 bg-cyan-50/50 text-cyan-800 shadow-md translate-x-[-8px]" 
-                : "border-slate-50 bg-slate-50/30 hover:bg-slate-50 hover:border-slate-200 text-slate-600"
-              }`}
-            >
-              <span className="font-bold text-lg">{o}</span>
-              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${ans[idx] === i ? 'border-cyan-600 bg-cyan-600 text-white' : 'border-slate-300'}`}>
-                {ans[idx] === i && <div className="w-2 h-2 bg-white rounded-full"></div>}
-              </div>
-            </button>
-          ))}
+          {currentQuestion.options.map((o, i) => { const isSelected = currentQuestion.type === "multiple_select" ? (Array.isArray(ans[idx]) && ans[idx].includes(i)) : ans[idx] === i; return ( <button key={i} onClick={() => { if (currentQuestion.type === "multiple_select") { const currentAns = Array.isArray(ans[idx]) ? ans[idx] : []; const newAns = currentAns.includes(i) ? currentAns.filter(x => x !== i) : [...currentAns, i]; setAns({ ...ans, [idx]: newAns }); } else { setAns({ ...ans, [idx]: i }); } }} className={`group w-full p-6 rounded-[24px] border-2 text-right transition-all duration-300 flex items-center justify-between ${isSelected ? "border-cyan-500 bg-cyan-50/50 text-cyan-800 shadow-md translate-x-[-8px]" : "border-slate-50 bg-slate-50/30 hover:bg-slate-50 hover:border-slate-200 text-slate-600"}`}> <span className="font-bold text-lg">{o}</span> {currentQuestion.type === "multiple_select" ? ( <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${isSelected ? 'border-cyan-600 bg-cyan-600 text-white' : 'border-slate-300'}`}> {isSelected && <CheckCircle2 size={16} />} </div> ) : ( <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'border-cyan-600 bg-cyan-600 text-white' : 'border-slate-300'}`}> {isSelected && <div className="w-2 h-2 bg-white rounded-full"></div>} </div> )} </button> ); })}
         </div>
       </div>
 
@@ -504,6 +495,8 @@ const App = () => {
 };
 
 export default App;
+
+
 
 
 
