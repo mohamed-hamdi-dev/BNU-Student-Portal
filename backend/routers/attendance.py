@@ -229,14 +229,22 @@ def _ensure_session_open(session_row: AttendanceSession) -> None:
 
 def _resolve_student_from_scan_payload(db: Session, payload: AttendanceScanPayload) -> User:
     student_user_id = payload.student_user_id
-    student_code = str(payload.student_code or "").trim()
+    student_code = str(payload.student_code or "").strip()
     row = None
     if student_user_id:
         row = db.query(User).filter(User.id == int(student_user_id)).first()
     elif student_code:
+        # Try student_code first, then username, then id
         row = db.query(User).filter(User.student_code == student_code).first()
+        if not row:
+            row = db.query(User).filter(User.username == student_code).first()
+        if not row:
+            try:
+                row = db.query(User).filter(User.id == int(student_code)).first()
+            except (ValueError, TypeError):
+                pass
     if not row:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise HTTPException(status_code=404, detail=f"Student not found: {student_code or student_user_id}")
     return row
 
 
