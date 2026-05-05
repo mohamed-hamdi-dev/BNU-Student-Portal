@@ -442,26 +442,26 @@ export default function AdminAttendancePage() {
   }, [activeSessionOpen, scannerEnabled]);
 
   return (
-    <div className="space-y-5" dir="rtl">
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="space-y-4 sm:space-y-5 px-2 sm:px-4 lg:px-0" dir="rtl">
+      <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">إدارة حضور الطلاب</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">إدارة حضور الطلاب</h1>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500">
               ربط الغياب بالشعبة المسجل بها الطالب وتسجيل الحضور يدويًا من خلال قاعدة البيانات.
             </p>
           </div>
-          <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            <ShieldAlert size={18} className="text-cyan-700" />
+          <div className="flex items-start sm:items-center gap-2 rounded-2xl bg-slate-50 px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-600">
+            <ShieldAlert size={18} className="text-cyan-700 shrink-0 mt-0.5 sm:mt-0" />
             <span>نسخة MVP: تسجيل يدوي أولًا، وQR جاهز للربط لاحقًا من نفس الـ session.</span>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <div className="space-y-5">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-black text-slate-900">اختيار المادة والشعبة</h2>
+      <div className="grid gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="order-2 space-y-4 sm:space-y-5 lg:order-1">
+          <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+            <h2 className="text-base sm:text-lg font-black text-slate-900">اختيار المادة والشعبة</h2>
             <div className="mt-4 grid gap-3">
               <label className="space-y-1">
                 <span className="text-xs font-bold text-slate-500">السنة الأكاديمية</span>
@@ -518,8 +518,8 @@ export default function AdminAttendancePage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-black text-slate-900">إنشاء جلسة حضور</h2>
+          <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+            <h2 className="text-base sm:text-lg font-black text-slate-900">إنشاء جلسة حضور</h2>
             <div className="mt-4 grid gap-3">
               <label className="space-y-1">
                 <span className="text-xs font-bold text-slate-500">عنوان الجلسة</span>
@@ -562,7 +562,7 @@ export default function AdminAttendancePage() {
                 type="button"
                 onClick={handleCreateSession}
                 disabled={saving || !selectedOfferingId}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#05ADCF] px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl bg-[#05ADCF] px-4 py-3 text-sm font-black text-white disabled:opacity-50"
               >
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                 إنشاء Session جديد
@@ -570,8 +570,8 @@ export default function AdminAttendancePage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-black text-slate-900">جلسات الشعبة</h2>
+          <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+            <h2 className="text-base sm:text-lg font-black text-slate-900">جلسات الشعبة</h2>
             <div className="mt-4 space-y-2">
               {sessions.length === 0 && <p className="text-sm text-slate-400">لا توجد جلسات لهذه الشعبة حتى الآن.</p>}
               {sessions.map((item) => {
@@ -604,49 +604,49 @@ export default function AdminAttendancePage() {
           </div>
         </div>
 
-        <div className="space-y-5">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-xl font-black text-slate-900">
+        <div className="order-1 space-y-4 sm:space-y-5 lg:order-2">
+          <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+            <div className="flex flex-col gap-3">
+              <div className="min-w-0">
+                <h2 className="break-words text-base sm:text-lg font-black text-slate-900 md:text-xl">
                   {selectedOffering?.display_title || selectedOffering?.course_title_ar || "سجل الجلسة"}
                   {selectedOffering?.section ? ` - ${selectedOffering.section}` : ""}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-xs sm:text-sm text-slate-500">
                   {activeSession?.title || "اختر Session من القائمة أو أنشئ واحدة جديدة"}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  <span className="font-black text-slate-900">{totals.registered_students || 0}</span> طالب مسجل
+              <div className="grid w-full grid-cols-4 gap-1.5 sm:gap-2">
+                <div className="rounded-xl sm:rounded-2xl bg-slate-50 px-2 sm:px-3 py-2 sm:py-3 text-center text-xs sm:text-sm text-slate-600">
+                  <span className="block text-base sm:text-lg font-black text-slate-900">{totals.registered_students || 0}</span> <span className="hidden xs:inline">طالب</span> مسجل
                 </div>
-                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  <span className="font-black">{totals.present || 0}</span> حاضر
+                <div className="rounded-xl sm:rounded-2xl bg-emerald-50 px-2 sm:px-3 py-2 sm:py-3 text-center text-xs sm:text-sm text-emerald-700">
+                  <span className="block text-base sm:text-lg font-black">{totals.present || 0}</span> حاضر
                 </div>
-                <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  <span className="font-black">{totals.late || 0}</span> متأخر
+                <div className="rounded-xl sm:rounded-2xl bg-amber-50 px-2 sm:px-3 py-2 sm:py-3 text-center text-xs sm:text-sm text-amber-700">
+                  <span className="block text-base sm:text-lg font-black">{totals.late || 0}</span> متأخر
                 </div>
-                <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  <span className="font-black">{totals.absent || 0}</span> غائب
+                <div className="rounded-xl sm:rounded-2xl bg-rose-50 px-2 sm:px-3 py-2 sm:py-3 text-center text-xs sm:text-sm text-rose-700">
+                  <span className="block text-base sm:text-lg font-black">{totals.absent || 0}</span> غائب
                 </div>
               </div>
             </div>
 
             {error ? (
-              <div className="mt-4 flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                <AlertTriangle size={16} />
+              <div className="mt-3 sm:mt-4 flex items-start sm:items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-rose-700">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5 sm:mt-0" />
                 <span>{error}</span>
               </div>
             ) : null}
 
             {activeSession ? (
               <div className="mt-4 space-y-4">
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
                   <button
                     type="button"
                     onClick={handleCloseSession}
                     disabled={saving || !activeSessionOpen}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-xs sm:text-sm font-black text-white disabled:opacity-50"
                   >
                     {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                     غلق الجلسة واعتماد الغياب
@@ -658,15 +658,15 @@ export default function AdminAttendancePage() {
                   ) : null}
                 </div>
 
-                <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <div className="grid gap-4">
+                  <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
                     <div className="flex items-center gap-2 text-slate-700">
                       <QrCode size={18} className="text-cyan-700" />
                       <h3 className="font-black">QR الجلسة</h3>
                     </div>
-                    <div className="mt-4 flex justify-center rounded-3xl bg-white p-4 shadow-sm">
+                    <div className="mt-3 sm:mt-4 flex justify-center rounded-2xl sm:rounded-3xl bg-white p-3 sm:p-4 shadow-sm">
                       {sessionQrValue ? (
-                        <QRCodeSVG value={sessionQrValue} size={180} level="M" includeMargin />
+                        <QRCodeSVG value={sessionQrValue} size={160} level="M" includeMargin className="h-auto w-full max-w-[150px] sm:max-w-[180px]" />
                       ) : (
                         <div className="flex h-[180px] w-[180px] items-center justify-center text-sm text-slate-400">
                           لا يوجد QR متاح
@@ -678,7 +678,7 @@ export default function AdminAttendancePage() {
                     </p>
                   </div>
 
-                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h3 className="font-black text-slate-900">ماسح QR</h3>
@@ -688,7 +688,7 @@ export default function AdminAttendancePage() {
                         type="button"
                         onClick={() => setScannerEnabled((prev) => !prev)}
                         disabled={!activeSessionOpen}
-                        className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black text-white disabled:opacity-50 ${
+                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-black text-white disabled:opacity-50 ${
                           scannerEnabled ? "bg-slate-700" : "bg-[#05ADCF]"
                         }`}
                       >
@@ -697,28 +697,28 @@ export default function AdminAttendancePage() {
                       </button>
                     </div>
 
-                    <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-950">
-                      <video ref={videoRef} muted playsInline className="h-[260px] w-full object-cover" />
+                    <div className="mt-3 sm:mt-4 overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200 bg-slate-950">
+                      <video ref={videoRef} muted playsInline className="h-[180px] sm:h-[220px] w-full object-cover md:h-[260px]" />
                       {!scannerEnabled ? (
-                        <div className="flex h-[260px] items-center justify-center text-center text-sm text-slate-300">
+                        <div className="flex h-[180px] sm:h-[220px] md:h-[260px] items-center justify-center px-4 text-center text-xs sm:text-sm text-slate-300">
                           اضغط تشغيل الماسح ثم وجّه الكاميرا إلى QR الطالب.
                         </div>
                       ) : null}
                       <canvas ref={canvasRef} className="hidden" />
                     </div>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <div className="mt-3 sm:mt-4 grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-[1fr_auto]">
                       <input
                         value={manualStudentCode}
                         onChange={(e) => setManualStudentCode(e.target.value)}
                         placeholder="أدخل كود الطالب أو نص QR يدويًا"
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 sm:py-3 text-sm"
                       />
                       <button
                         type="button"
                         onClick={handleManualQrSubmit}
                         disabled={!activeSessionOpen || saving}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-cyan-700 border border-cyan-200 disabled:opacity-50"
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-black text-cyan-700 border border-cyan-200 disabled:opacity-50"
                       >
                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                         اعتماد يدوي
@@ -753,13 +753,73 @@ export default function AdminAttendancePage() {
             ) : null}
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
-              <Users size={18} className="text-cyan-700" />
-              <h3 className="font-black text-slate-900">قائمة الطلاب المسجلين</h3>
+          <div className="overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-3 sm:px-5 py-3 sm:py-4">
+              <Users size={18} className="text-cyan-700 shrink-0" />
+              <h3 className="text-sm sm:text-base font-black text-slate-900">قائمة الطلاب المسجلين</h3>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-[980px] w-full text-right">
+            <div className="block lg:hidden">
+              {loading && !sessionPayload ? (
+                <div className="px-3 sm:px-4 py-6 sm:py-8 text-center text-xs sm:text-sm text-slate-400">
+                  جارٍ التحميل...
+                </div>
+              ) : null}
+              {!loading && (!sessionPayload || !Array.isArray(sessionPayload?.records) || sessionPayload.records.length === 0) ? (
+                <div className="px-3 sm:px-4 py-6 sm:py-8 text-center text-xs sm:text-sm text-slate-400">
+                  اختر Session لعرض الطلاب أو أنشئ جلسة جديدة.
+                </div>
+              ) : null}
+              <div className="space-y-2 sm:space-y-3 p-3 sm:p-4">
+                {(sessionPayload?.records || []).map((item) => {
+                  const currentStatus = String(item?.attendance_status || "unmarked").toLowerCase();
+                  const meta = statusMeta[currentStatus] || statusMeta.unmarked;
+                  return (
+                    <div key={item.student_user_id} className="rounded-xl sm:rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-black text-slate-900">{item.student_name}</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.student_code || item.student_user_id}</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.college || "-"}</div>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${meta.chip}`}>{meta.label}</span>
+                      </div>
+                      <div className="mt-3 text-xs text-slate-500">
+                        آخر تحديث: {item.marked_at ? new Date(item.marked_at).toLocaleString("ar-EG") : "-"}
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          disabled={!activeSessionOpen || saving}
+                          onClick={() => handleStatusChange(item.student_user_id, "present")}
+                          className="rounded-xl bg-emerald-50 px-2 py-2 text-xs font-black text-emerald-700 disabled:opacity-50"
+                        >
+                          حاضر
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!activeSessionOpen || saving}
+                          onClick={() => handleStatusChange(item.student_user_id, "late")}
+                          className="inline-flex items-center justify-center gap-1 rounded-xl bg-amber-50 px-2 py-2 text-xs font-black text-amber-700 disabled:opacity-50"
+                        >
+                          <Clock3 size={12} />
+                          متأخر
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!activeSessionOpen || saving}
+                          onClick={() => handleStatusChange(item.student_user_id, "absent")}
+                          className="rounded-xl bg-rose-50 px-2 py-2 text-xs font-black text-rose-700 disabled:opacity-50"
+                        >
+                          غائب
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="min-w-[720px] w-full text-right">
                 <thead className="bg-slate-50 text-xs text-slate-600">
                   <tr>
                     <th className="px-4 py-3">الكود</th>
