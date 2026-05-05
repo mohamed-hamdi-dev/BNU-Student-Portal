@@ -101,8 +101,19 @@ SEAT_OCCUPYING_REQUEST_STATUSES = {
 
 
 def ensure_academic_core_schema(db: Session) -> None:
-    """Schema is managed centrally by ORM metadata creation."""
-    return None
+    inspector = inspect(db.bind)
+    try:
+        columns = {str(col.get("name") or "").strip().lower() for col in inspector.get_columns("ac_registration_selections")}
+    except Exception:
+        columns = set()
+    if "display_title" not in columns:
+        dialect = str(getattr(db.bind.dialect, "name", "") or "").lower()
+        ddl = "TEXT" if dialect == "sqlite" else "VARCHAR(255)"
+        try:
+            db.execute(text(f"ALTER TABLE ac_registration_selections ADD COLUMN display_title {ddl}"))
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 def _now() -> datetime:
@@ -1003,6 +1014,7 @@ def _apply_registration_request_selections(
     selection_context: list[dict[str, Any]] | None = None,
 ) -> tuple[float, int, int]:
     profile = _get_student_profile(db, req.student_user_id)
+    ensure_academic_core_schema(db)
     _strict_validate_selection_context(
         db=db,
         req=req,
@@ -1011,6 +1023,7 @@ def _apply_registration_request_selections(
         selection_context=selection_context,
     )
     unique_offering_ids = [int(x) for x in list(dict.fromkeys(offering_ids or []))]
+    selection_display_title_map = _selection_context_display_title_map(selection_context)
     if len(unique_offering_ids) != len(offering_ids):
         raise HTTPException(status_code=400, detail="Duplicate offerings are not allowed")
 
@@ -1127,6 +1140,9 @@ def _apply_registration_request_selections(
             "course_id": int(course.id),
             "course_code": course.code,
             "course_title_ar": course.title_ar,
+            "display_title": selection_display_title_map.get(
+                (str(course.code or "").strip().upper(), _normalize_section_match_token(offering.section))
+            ),
             "section": offering.section,
             "day_of_week": offering.day_of_week,
             "start_time": offering.start_time,
@@ -1142,6 +1158,7 @@ def _apply_registration_request_selections(
             "course_id": int(course.id),
             "course_code": course.code,
             "course_title_ar": course.title_ar,
+            "display_title": _normalize_display_title(getattr(_selection, "display_title", None)),
             "section": offering.section,
             "day_of_week": offering.day_of_week,
             "start_time": offering.start_time,
@@ -1220,11 +1237,16 @@ def _apply_registration_request_selections(
     db.query(RegistrationCourseSelection).filter(RegistrationCourseSelection.registration_request_id == req.id).delete()
     for offering_id in unique_offering_ids:
         offering = offerings_by_id[offering_id]
+        course = course_map[offering_id]
+        display_title = selection_display_title_map.get(
+            (str(course.code or "").strip().upper(), _normalize_section_match_token(offering.section))
+        )
         db.add(
             RegistrationCourseSelection(
                 registration_request_id=req.id,
                 offering_id=offering.id,
                 student_user_id=req.student_user_id,
+                display_title=display_title,
                 status="selected",
             )
         )
@@ -1371,6 +1393,28 @@ def _normalize_section_match_token(value: Any) -> str:
         .replace("_", "")
         .replace(" ", "")
     )
+
+
+def _normalize_display_title(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    return raw[:255] if raw else None
+
+
+def _selection_context_display_title_map(
+    selection_context: list[dict[str, Any]] | None,
+) -> dict[tuple[str, str], str]:
+    ctx_list = selection_context if isinstance(selection_context, list) else []
+    result: dict[tuple[str, str], str] = {}
+    for item in ctx_list:
+        if not isinstance(item, dict):
+            continue
+        course_code = str(item.get("course_code") or "").strip().upper()
+        selected_section = _normalize_section_match_token(item.get("selected_section"))
+        display_title = _normalize_display_title(item.get("display_title") or item.get("course_title"))
+        if not course_code or not selected_section or not display_title:
+            continue
+        result[(course_code, selected_section)] = display_title
+    return result
 
 
 def _strict_validate_selection_context(
@@ -3402,6 +3446,7 @@ async def list_registration_requests(
                 "course_id": int(course.id),
                 "course_code": course.code,
                 "course_title_ar": course.title_ar,
+                "display_title": _normalize_display_title(selection.display_title),
                 "credit_hours": float(course.credit_hours or 0),
                 "section": offering.section,
                 "study_year": course.study_year,
@@ -3775,6 +3820,7 @@ async def my_registration(academic_year_label: str, semester: str, db: Session =
                 "course_id": course.id,
                 "course_code": course.code,
                 "course_title_ar": course.title_ar,
+                "display_title": _normalize_display_title(selection.display_title),
                 "credit_hours": course.credit_hours,
                 "section": offering.section,
                 "day_of_week": offering.day_of_week,
@@ -4294,6 +4340,7 @@ async def registration_by_student(
             {
                 "course_code": course.code,
                 "course_title_ar": course.title_ar,
+                "display_title": _normalize_display_title(selection.display_title),
                 "credit_hours": course.credit_hours,
                 "section": offering.section,
                 "day_of_week": offering.day_of_week,

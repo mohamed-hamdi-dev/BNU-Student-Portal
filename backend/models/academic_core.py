@@ -205,6 +205,7 @@ class RegistrationCourseSelection(Base):
     registration_request_id = Column(Integer, ForeignKey("ac_registration_requests.id", ondelete="CASCADE"), nullable=False, index=True)
     offering_id = Column(Integer, ForeignKey("ac_course_offerings.id", ondelete="CASCADE"), nullable=False, index=True)
     student_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    display_title = Column(String(255), nullable=True)
     status = Column(String(20), nullable=False, default="selected", index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

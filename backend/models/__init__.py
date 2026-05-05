@@ -51,6 +51,7 @@ from .academic_core import (
 )
 from .knowledge import ContentItem, KnowledgeDocument, KnowledgeChunk, Asset, ChunkAssetMap
 from .auth_security import UserSession, LoginAttempt
+from .attendance import AttendanceSession, AttendanceRecord
 
 __all__ = [
     "User",
@@ -109,4 +110,6 @@ __all__ = [
     "ChunkAssetMap",
     "UserSession",
     "LoginAttempt",
+    "AttendanceSession",
+    "AttendanceRecord",
 ]

@@ -428,7 +428,9 @@ const gradeToPoints = (grade) => {
         "C-": 1.7,
         "D+": 1.3,
         D: 1.0,
+        "D-": 0.7,
         F: 0.0,
+        L: 0.0,
     };
     return pointsMap[String(grade).toUpperCase().trim()] || 0.0;
 };

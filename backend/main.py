@@ -16,7 +16,7 @@ from gpa_calculator import calculate_gpa, GPACourse
 from routers import (
     auth_router, users_router, conversations_router, messages_router, 
     dashboard_router, feedback_router, content_router, storage_router, 
-    settings_router, campus_router, ai_router, courses_router, quizzes_router, academic_router, academic_core_router, payment_router, maintenance_router, knowledge_router
+    settings_router, campus_router, ai_router, courses_router, quizzes_router, academic_router, academic_core_router, payment_router, maintenance_router, knowledge_router, attendance_router
 )
 from routers.ai_router import rag_chatbot as router_rag_chatbot
 from core.deps import get_current_user, get_db
@@ -28,7 +28,7 @@ from models.knowledge import Asset as KnowledgeAsset, ChunkAssetMap
 from core.database import create_all_tables
 from core.database import SessionLocal
 from core.config import get_settings
-from routers.academic_core import seed_default_assessment_templates
+from routers.academic_core import ensure_academic_core_schema, seed_default_assessment_templates
 
 load_dotenv()
 settings = get_settings()
@@ -57,6 +57,7 @@ app.include_router(academic_core_router, prefix="/api")
 app.include_router(payment_router, prefix="/api")
 app.include_router(maintenance_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")
+app.include_router(attendance_router, prefix="/api")
 
 # CORS middleware
 allowed_origins = {
@@ -95,6 +96,7 @@ async def startup_event():
     create_all_tables()
     db = SessionLocal()
     try:
+        ensure_academic_core_schema(db)
         seed_default_assessment_templates(db)
     finally:
         db.close()
@@ -2031,28 +2033,14 @@ def _load_all_chunks_for_document(document_id: str) -> List[dict]:
 
 def _grade_from_percentage(percentage: float) -> str:
     if percentage >= 90:
-        return "A+"
-    if percentage >= 85:
         return "A"
     if percentage >= 80:
-        return "A-"
-    if percentage >= 75:
-        return "B+"
-    if percentage >= 70:
         return "B"
-    if percentage >= 65:
-        return "B-"
     if percentage >= 60:
-        return "C+"
-    if percentage >= 55:
         return "C"
     if percentage >= 50:
-        return "C-"
-    if percentage >= 45:
-        return "D+"
-    if percentage >= 40:
         return "D"
-    return "F"
+    return "L"
 
 @app.post("/api/gpa/calculate", response_model=GPAResponse)
 async def calculate_gpa_endpoint(request: GPARequest):
@@ -2060,11 +2048,11 @@ async def calculate_gpa_endpoint(request: GPARequest):
     Calculate GPA from a list of courses.
     
     Grade scale:
-    - A: 4.0
+    - A / A+: 4.0
     - B: 3.0
     - C: 2.0
     - D: 1.0
-    - F: 0.0
+    - L / F: 0.0
     """
     try:
         courses = [GPACourse(name=course.name, credits=course.credits, grade=course.grade.upper()) 

@@ -397,6 +397,7 @@ class RegistrationSelectionResponse(BaseModel):
     registration_request_id: int
     offering_id: int
     student_user_id: int
+    display_title: str | None = None
     status: str
     created_at: datetime
     updated_at: datetime

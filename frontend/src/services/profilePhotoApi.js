@@ -1,6 +1,6 @@
 import { apiFetch } from "./api";
 
-const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 const normalizeApiBase = (rawValue) => {
   const value = String(rawValue || "").trim();

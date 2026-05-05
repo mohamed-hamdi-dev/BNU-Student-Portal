@@ -27,6 +27,14 @@ from schemas.academic_core import (
 )
 from schemas.payment import PaymentCalculateRequest, PaymentBreakdownResponse, BankSlipCreateRequest, PaymentStatusUpdateRequest, PaymentRecordResponse
 from schemas.user_photo import UserProfilePhotoResponse, UserProfilePhotoRejectRequest
+from schemas.attendance import (
+    AttendanceSessionCreate,
+    AttendanceSessionResponse,
+    AttendanceRecordUpsert,
+    AttendanceRecordResponse,
+    AttendanceMySummaryResponse,
+    AttendanceCourseHistoryResponse,
+)
 
 __all__ = [
     "Token", "TokenPayload", "LoginRequest", "OTPRequest", "OTPVerify", "ResetPassword", "ChangePassword",
@@ -53,4 +61,7 @@ __all__ = [
     "AuditLogResponse",
     "PaymentCalculateRequest", "PaymentBreakdownResponse", "BankSlipCreateRequest", "PaymentStatusUpdateRequest", "PaymentRecordResponse",
     "UserProfilePhotoResponse", "UserProfilePhotoRejectRequest",
+    "AttendanceSessionCreate", "AttendanceSessionResponse",
+    "AttendanceRecordUpsert", "AttendanceRecordResponse",
+    "AttendanceMySummaryResponse", "AttendanceCourseHistoryResponse",
 ]

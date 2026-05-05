@@ -29,6 +29,8 @@ backend/*.log
 
 # Runtime databases and local data dumps
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 **/db.json
@@ -38,6 +40,7 @@ backend/chroma_db/
 # Uploaded/generated files (keep code only)
 backend/uploads/
 backend/storage/
+backend/storage_files/profile_photos/
 
 # OS / IDE
 .DS_Store

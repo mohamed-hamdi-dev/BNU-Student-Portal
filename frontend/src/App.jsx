@@ -4,6 +4,7 @@ import LoginPage from "./pages/LoginPage.jsx";
 import Layout from "./layout/layout.jsx";
 import ForgetPassword from "./pages/ForgetPassword.jsx";
 import StudentDashboardPage from "./pages/student/StudentDashboardPage.jsx";
+import StudentAttendancePage from "./pages/student/StudentAttendancePage.jsx";
 import ErrorPage from "./pages/ErrorPage.jsx";
 import StudentPage from "./pages/student/StudentPage.jsx";
 import CourseTable from "./pages/CourseTable.jsx";
@@ -140,6 +141,7 @@ const router = createBrowserRouter([
                     { path: "/registration-form", element: <RegistrationFormPage /> },
                     { path: "/sections", element: <SectionsSelectionPage /> },
                     { path: "/student/advisor-request", element: <StudentAdvisorRequestPage /> },
+                    { path: "/student/attendance", element: <StudentAttendancePage /> },
                     { path: "*", element: <ErrorPage /> },
                 ],
             },

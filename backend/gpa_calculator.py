@@ -22,6 +22,7 @@ GRADE_POINTS = {
     "D": 1.0,
     "D-": 0.7,
     "F": 0.0,
+    "L": 0.0,
 }
 
 def get_grade_points(grade: str) -> float:

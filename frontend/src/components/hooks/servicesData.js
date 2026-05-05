@@ -5,6 +5,7 @@ export const services = [
     { id: "personal-data", label: "personal_data", Icon: User, color: "#6D28D9", iconBg: "#F2ECFF", path: "/persondata" },
     { id: "institutional-results", label: "academic_results", Icon: ListChecks, color: "#4F46E5", iconBg: "#EEF0FF", path: "/CourseTable" },
     { id: "academic-reg", label: "academic_registration", Icon: ClipboardList, color: "#0F766E", iconBg: "#EAF7F6", path: "/AcademicRegistration" },
+    { id: "attendance", label: "attendance_presence", Icon: CalendarCheck, color: "#0F766E", iconBg: "#E6FAF6", path: "/student/attendance" },
     { id: "registration-form", label: "registration_form", Icon: CalendarCheck, color: "#475569", iconBg: "#F1F5F9", path: "/registration-form" },
     { id: "sections", label: "sections", Icon: ListX, color: "#0F766E", iconBg: "#EAF7F6", path: "/sections" },
     { id: "Qiezs", label: "QiezBNU", Icon: FileText, color: "#0F9D79", iconBg: "#ECF8F4", path: "/Qiez-BNU" },

@@ -73,7 +73,9 @@ export const gradeToPoints = (grade) => {
         "C-": 1.7,
         "D+": 1.3,
         D: 1.0,
+        "D-": 0.7,
         F: 0.0,
+        L: 0.0,
     };
 
     if (!grade) return 0;
@@ -137,7 +139,7 @@ export const calculateSemesterGpa = (courses = []) => {
 
     let totalPoints = 0;
     let totalCredits = 0;
-    const validGrades = new Set(["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "F"]);
+    const validGrades = new Set(["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F", "L"]);
 
     courses.forEach((course) => {
         const normalized = normalizeCourse(course);

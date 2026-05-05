@@ -18,11 +18,12 @@ from routers.academic_core import router as academic_core_router
 from routers.payment import router as payment_router
 from routers.maintenance import router as maintenance_router
 from routers.knowledge import router as knowledge_router
+from routers.attendance import router as attendance_router
 
 __all__ = [
     "auth_router", "users_router", 
     "conversations_router", "messages_router", 
     "dashboard_router", "feedback_router",
     "content_router", "storage_router", "settings_router",
-    "campus_router", "chatbot_router", "ai_router", "courses_router", "quizzes_router", "academic_router", "academic_core_router", "payment_router", "maintenance_router", "knowledge_router"
+    "campus_router", "chatbot_router", "ai_router", "courses_router", "quizzes_router", "academic_router", "academic_core_router", "payment_router", "maintenance_router", "knowledge_router", "attendance_router"
 ]

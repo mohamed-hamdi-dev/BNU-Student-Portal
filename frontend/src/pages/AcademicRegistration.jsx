@@ -966,6 +966,7 @@ const App = () => {
                 selectionContext.push({
                     course_code: String(course?.code || course?.id || "").trim().toUpperCase(),
                     selected_section: selectedSectionRaw,
+                    display_title: String(course?.name || course?.title || course?.course_title_ar || course?.code || "").trim(),
                 });
                 const directOfferingId = Number(course?.offering_id || course?.offeringId || course?.selectedGroup?.offering_id || course?.selectedGroup?.offeringId);
                 if (Number.isFinite(directOfferingId) && directOfferingId > 0) {

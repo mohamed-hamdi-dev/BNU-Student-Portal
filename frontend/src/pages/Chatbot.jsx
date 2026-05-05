@@ -104,16 +104,10 @@ const createSession = (mode = "general", student = {}, t = (key) => key) => ({
 const scoreToLetterGrade = (score) => {
   const normalized = Number(score || 0);
   if (normalized >= 90) return "A";
-  if (normalized >= 85) return "A-";
-  if (normalized >= 80) return "B+";
-  if (normalized >= 75) return "B";
-  if (normalized >= 70) return "B-";
-  if (normalized >= 65) return "C+";
-  if (normalized >= 60) return "C";
-  if (normalized >= 55) return "C-";
-  if (normalized >= 50) return "D+";
-  if (normalized >= 40) return "D";
-  return "F";
+  if (normalized >= 80) return "B";
+  if (normalized >= 70) return "C";
+  if (normalized >= 50) return "D";
+  return "L";
 };
 const gradeToPoints = (grade) =>
   ({
@@ -130,6 +124,7 @@ const gradeToPoints = (grade) =>
     D: 1,
     "D-": 0.7,
     F: 0,
+    L: 0,
   }[String(grade || "").toUpperCase()] ?? 0);
 
 export default function Chatbot() {
