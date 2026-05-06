@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from core.deps import get_db, get_current_user, require_role
 from models.user import User
@@ -33,8 +33,23 @@ CONTENT_SCHEMA_COLUMNS = {
 
 
 def ensure_content_schema(db: Session):
-    """Schema is managed centrally by ORM metadata creation."""
-    return None
+    """Backfill newer content columns for existing databases."""
+    inspector = inspect(db.bind)
+    try:
+        existing = {col["name"] for col in inspector.get_columns("content_posts")}
+    except Exception:
+        return
+
+    missing = [(name, ddl) for name, ddl in CONTENT_SCHEMA_COLUMNS.items() if name not in existing]
+    if not missing:
+        return
+
+    for _name, ddl in missing:
+        try:
+            db.execute(text(ddl))
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 def _normalize_scope_text(value: str) -> str:

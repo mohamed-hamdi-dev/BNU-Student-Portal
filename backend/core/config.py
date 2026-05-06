@@ -39,6 +39,9 @@ class Settings:
         "DATABASE_URL",
         f"sqlite:///{Path(__file__).resolve().parent.parent / 'bnu_portal.db'}",
     )
+    DB_POOL_RECYCLE_SECONDS: int = _env_int("DB_POOL_RECYCLE_SECONDS", 300)
+    DB_POOL_TIMEOUT_SECONDS: int = _env_int("DB_POOL_TIMEOUT_SECONDS", 30)
+    DB_CONNECT_TIMEOUT_SECONDS: int = _env_int("DB_CONNECT_TIMEOUT_SECONDS", 10)
 
     JWT_SECRET_KEY: str = _env_str("JWT_SECRET_KEY", "CHANGE-ME-in-production-use-openssl-rand-hex-32")
     JWT_ALGORITHM: str = _env_str("JWT_ALGORITHM", "HS256")

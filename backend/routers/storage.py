@@ -3,13 +3,10 @@ Storage Router.
 Handles files metadata posted by admins to specific student scopes.
 """
 
-from io import BytesIO
 from pathlib import Path
 from typing import List
-from uuid import uuid4
 import re
-import zipfile
-from xml.etree import ElementTree as ET
+from uuid import uuid4
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
@@ -22,6 +19,17 @@ from models.user import User
 from models.storage import StorageItem
 from models.content import ContentPost
 from schemas.storage import StorageCreate, StorageUpdate, StorageResponse
+from services.document_ingestion import (
+    IMAGE_EXTENSIONS,
+    INDEXABLE_EXTENSIONS,
+    delete_document_vectors,
+    ensure_supported_upload,
+    ensure_upload_content,
+    index_prepared_document,
+    prepare_indexable_document,
+    prepare_indexable_document_from_existing,
+    save_uploaded_binary,
+)
 
 router = APIRouter(prefix="/storage", tags=["storage"])
 STORAGE_FILES_DIR = Path(__file__).resolve().parent.parent / "storage_files"
@@ -31,17 +39,42 @@ PUBLIC_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 _STORAGE_FILE_ROUTE_RE = re.compile(r"/api/storage/files/([^/?#]+)", re.IGNORECASE)
 
 
+def _rag_retrieval_ready() -> bool:
+    try:
+        from routers.chatbot import rag_chatbot
+    except Exception:
+        return False
+    return bool(rag_chatbot is not None and getattr(rag_chatbot, "vector_store", None) is not None)
+
+
 def ensure_storage_schema(db: Session):
     existing = {col["name"] for col in inspect(db.bind).get_columns("storage_items")}
-    if "file_bytes" in existing:
-        return
     dialect = str(getattr(db.bind.dialect, "name", "") or "").lower()
-    ddl = "BYTEA" if dialect == "postgresql" else "BLOB"
-    try:
-        db.execute(text(f"ALTER TABLE storage_items ADD COLUMN file_bytes {ddl}"))
-        db.commit()
-    except Exception:
-        db.rollback()
+
+    # All columns that might need adding with their DDL types
+    new_columns = {
+        "file_bytes": "BYTEA" if dialect == "postgresql" else "BLOB",
+        "extracted_text": "TEXT",
+        "chunks_count": "INTEGER DEFAULT 0",
+        "indexing_status": "VARCHAR(32) DEFAULT 'pending'",
+        "indexing_error": "TEXT",
+        "college": "VARCHAR(200)",
+        "program": "VARCHAR(200)",
+        "academic_year": "VARCHAR(40)",
+        "semester": "VARCHAR(40)",
+        "keywords": "VARCHAR(500)",
+        "priority": "INTEGER DEFAULT 0",
+        "source_type": "VARCHAR(40)",
+        "content_type": "VARCHAR(100)",
+    }
+
+    for col_name, col_ddl in new_columns.items():
+        if col_name not in existing:
+            try:
+                db.execute(text(f"ALTER TABLE storage_items ADD COLUMN {col_name} {col_ddl}"))
+                db.commit()
+            except Exception:
+                db.rollback()
 
 
 def _normalize_scope_text(value: str) -> str:
@@ -145,78 +178,6 @@ def _canonical_college_key(value: str) -> str:
     if "dentistry" in text or "\u0627\u0633\u0646\u0627\u0646" in text:
         return "dentistry"
     return ""
-
-
-def _pdf_pages_from_upload(content: bytes) -> List[dict]:
-    try:
-        from pypdf import PdfReader
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="pypdf is not installed on the server.") from exc
-
-    reader = PdfReader(BytesIO(content))
-    pages: List[dict] = []
-    for idx, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if not text:
-            continue
-        pages.append({"page": idx, "text": text})
-    return pages
-
-
-def _docx_pages_from_upload(content: bytes) -> List[dict]:
-    try:
-        with zipfile.ZipFile(BytesIO(content)) as archive:
-            document_xml = archive.read("word/document.xml")
-    except KeyError as exc:
-        raise HTTPException(status_code=400, detail="The DOCX file does not contain a readable document body.") from exc
-    except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=400, detail="Invalid DOCX file.") from exc
-
-    try:
-        root = ET.fromstring(document_xml)
-    except ET.ParseError as exc:
-        raise HTTPException(status_code=400, detail="Could not parse DOCX content.") from exc
-
-    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    paragraphs: List[str] = []
-    for para in root.findall(".//w:p", namespace):
-        texts = [node.text for node in para.findall(".//w:t", namespace) if node.text]
-        paragraph_text = "".join(texts).strip()
-        if paragraph_text:
-            paragraphs.append(paragraph_text)
-
-    merged = "\n".join(paragraphs).strip()
-    if not merged:
-        return []
-    return [{"page": 1, "text": merged}]
-
-
-def _chunk_pdf_pages(pages: List[dict], chunk_size: int = 900, chunk_overlap: int = 120):
-    try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-    except Exception:
-        try:
-            from langchain.text_splitter import RecursiveCharacterTextSplitter
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail="Text splitter dependency is missing on the server.") from exc
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-
-    documents: List[str] = []
-    metadatas: List[dict] = []
-    for item in pages:
-        chunks = splitter.split_text(item["text"])
-        for chunk_idx, chunk in enumerate(chunks, start=1):
-            clean = " ".join(str(chunk or "").split())
-            if not clean:
-                continue
-            documents.append(clean)
-            metadatas.append({"page": item["page"], "chunk": chunk_idx})
-    return documents, metadatas
 
 
 def _infer_access_scope(level_value: str | None) -> str:
@@ -390,54 +351,83 @@ async def upload_and_index_storage_pdf(
     level: str | None = Form(None),
     category: str | None = Form(None),
     is_favorite: bool = Form(False),
+    replace_existing: bool = Form(False),
+    # Extended metadata fields
+    college: str | None = Form(None),
+    program: str | None = Form(None),
+    academic_year: str | None = Form(None),
+    semester: str | None = Form(None),
+    keywords: str | None = Form(None),
+    priority: int = Form(0),
+    content_type: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Upload a storage file, create a storage row, and index PDF/DOCX files for chatbot retrieval.
 
+    Set replace_existing=true to delete old vectors before indexing (Replace mode).
     Images are stored as regular storage items without indexing so they can be previewed/shared later.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required")
 
     original_name = Path(file.filename).name
-    ext = Path(original_name).suffix.lower()
-    image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-    if ext == ".doc":
-        raise HTTPException(status_code=400, detail="DOC files are not supported. Please upload DOCX or PDF.")
-    if ext not in {".pdf", ".docx", *image_exts}:
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF, DOCX, PNG, JPG, JPEG, WEBP, or GIF files are supported",
-        )
+    ext = ensure_supported_upload(original_name)
 
     content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty file is not allowed")
-    if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File is too large (max 20MB)")
+    ensure_upload_content(content)
 
     ensure_storage_schema(db)
-    stored_name = f"{uuid4().hex}{ext}"
-    destination = STORAGE_FILES_DIR / stored_name
-    destination.write_bytes(content)
+    prepared = None
+    if ext in INDEXABLE_EXTENSIONS:
+        prepared = prepare_indexable_document(content=content, original_name=original_name, storage_dir=STORAGE_FILES_DIR)
+        stored_name = prepared.stored_name
+    else:
+        stored_name, _ = save_uploaded_binary(content, original_name, STORAGE_FILES_DIR)
 
     normalized_level = str(level or "").strip() or None
+    normalized_college = str(college or "").strip() or None
+    normalized_program = str(program or "").strip() or None
+    normalized_academic_year = str(academic_year or "").strip() or None
+    normalized_semester = str(semester or "").strip() or None
+    normalized_keywords = str(keywords or "").strip() or None
+    normalized_content_type = str(content_type or "").strip() or None
+
     item = StorageItem(
         file_name=str(file_name or original_name).strip() or original_name,
         level=normalized_level,
         category=str(category or "").strip() or None,
         is_favorite=bool(is_favorite),
-        is_indexed=ext in {".pdf", ".docx"},
+        is_indexed=False,
+        indexing_status="pending",
         stored_name=stored_name,
         file_bytes=content,
         owner_id=current_user.id,
+        source_type=ext.lstrip(".") if ext else None,
+        # Extended metadata
+        college=normalized_college,
+        program=normalized_program,
+        academic_year=normalized_academic_year,
+        semester=normalized_semester,
+        keywords=normalized_keywords,
+        priority=priority,
+        content_type=normalized_content_type,
     )
+
+    # Store extracted text for preview
+    if prepared:
+        item.extracted_text = prepared.extracted_text
+        item.chunks_count = len(prepared.documents)
+
     db.add(item)
     db.commit()
     db.refresh(item)
 
-    if ext in image_exts:
+    if ext in IMAGE_EXTENSIONS:
+        item.indexing_status = "indexed"
+        db.add(item)
+        db.commit()
+        db.refresh(item)
         return {
             "item": StorageResponse.model_validate(item),
             "file": {
@@ -449,43 +439,69 @@ async def upload_and_index_storage_pdf(
             "pages_indexed": 0,
             "chunks_indexed": 0,
             "source": "storage_image",
+            "extraction_warnings": [],
         }
 
-    pages = _pdf_pages_from_upload(content) if ext == ".pdf" else _docx_pages_from_upload(content)
-    if not pages:
-        raise HTTPException(status_code=400, detail="No extractable text was found in this file.")
-    documents, metadatas = _chunk_pdf_pages(pages)
-    if not documents:
-        raise HTTPException(status_code=400, detail="No extractable text chunks were found in this file.")
+    indexed_now = False
+    indexing_message = None
+    indexing_error = None
+    if _rag_retrieval_ready():
+        from routers.chatbot import rag_chatbot
 
-    from routers.chatbot import rag_chatbot
+        # Replace mode: delete old vectors first
+        if replace_existing:
+            document_id = f"storage:{item.id}"
+            delete_document_vectors(rag_chatbot, document_id)
 
-    if rag_chatbot is None:
-        raise HTTPException(status_code=503, detail="AI Service unavailable.")
+        access_scope = _infer_access_scope(normalized_level)
+        college_text = normalized_college or _extract_college(normalized_level or "")
+        level_scope_value = _extract_level_scope_value(normalized_level or "")
+        base_metadata = {
+            "document_id": f"storage:{item.id}",
+            "source": "storage_pdf",
+            "source_type": prepared.source_type,
+            "access_scope": access_scope,
+            "level": _normalize_scope_text(level_scope_value or normalized_level or "") or None,
+            "college": college_text or None,
+            "college_key": _canonical_college_key(college_text),
+            "category": str(category or "").strip().lower() or None,
+            "storage_item_id": item.id,
+            "storage_file_name": item.file_name,
+            "owner_id": current_user.id,
+            "stored_name": stored_name,
+            "file_url": f"/api/storage/files/{stored_name}",
+            # Extended metadata in vectors
+            "program": normalized_program,
+            "academic_year": normalized_academic_year,
+            "semester": normalized_semester,
+            "keywords": normalized_keywords,
+            "priority": str(priority),
+            "content_type": normalized_content_type,
+        }
+        # Remove None values from metadata (ChromaDB doesn't accept None)
+        base_metadata = {k: v for k, v in base_metadata.items() if v is not None}
+        try:
+            index_prepared_document(rag_chatbot, prepared, base_metadata)
+            indexed_now = True
+        except Exception as exc:
+            indexed_now = False
+            indexing_error = str(exc)
+            indexing_message = f"Document uploaded, but indexing failed: {indexing_error}"
+    else:
+        indexing_message = "Document uploaded, but RAG indexing is not ready yet."
 
-    access_scope = _infer_access_scope(normalized_level)
-    college_text = _extract_college(normalized_level or "")
-    level_scope_value = _extract_level_scope_value(normalized_level or "")
-    base_metadata = {
-        "document_id": f"storage:{item.id}",
-        "source": "storage_pdf",
-        "source_type": "pdf" if ext == ".pdf" else "word",
-        "access_scope": access_scope,
-        "level": _normalize_scope_text(level_scope_value or normalized_level or "") or None,
-        "college": college_text or None,
-        "college_key": _canonical_college_key(college_text),
-        "category": str(category or "").strip().lower() or None,
-        "storage_item_id": item.id,
-        "storage_file_name": item.file_name,
-        "owner_id": current_user.id,
-        "stored_name": stored_name,
-        "file_url": f"/api/storage/files/{stored_name}",
-    }
-    rag_chatbot.index_documents(
-        documents,
-        metadatas=[{**base_metadata, **meta} for meta in metadatas],
-    )
-    rag_chatbot.flush()
+    now = datetime.now(timezone.utc)
+    if indexed_now:
+        item.is_indexed = True
+        item.indexing_status = "indexed"
+        item.indexing_error = None
+    else:
+        item.indexing_status = "failed" if indexing_error else "pending"
+        item.indexing_error = indexing_error
+    item.updated_at = now
+    db.add(item)
+    db.commit()
+    db.refresh(item)
 
     return {
         "item": StorageResponse.model_validate(item),
@@ -495,19 +511,24 @@ async def upload_and_index_storage_pdf(
             "stored_name": stored_name,
             "uploaded_by": current_user.id,
         },
-        "pages_indexed": len(pages),
-        "chunks_indexed": len(documents),
+        "pages_indexed": len(prepared.pages),
+        "chunks_indexed": len(prepared.documents) if indexed_now else 0,
         "source": "storage_pdf",
+        "indexing_ready": indexed_now,
+        "message": indexing_message or "Document uploaded and indexed successfully.",
+        "extracted_text_preview": (prepared.extracted_text[:500] + "...") if prepared and len(prepared.extracted_text) > 500 else (prepared.extracted_text if prepared else ""),
+        "extraction_warnings": prepared.extraction_warnings if prepared else [],
     }
 
 
 @router.post("/{item_id}/index", dependencies=[Depends(require_role("admin"))], status_code=status.HTTP_200_OK)
 async def index_existing_storage_pdf(
     item_id: int,
+    replace_existing: bool = Form(True),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Index an existing stored PDF file and mark it indexed."""
+    """Re-index an existing stored PDF/DOCX file. Deletes old vectors by default (replace mode)."""
     ensure_storage_schema(db)
     item = db.query(StorageItem).filter(StorageItem.id == item_id).first()
     if not item:
@@ -526,28 +547,39 @@ async def index_existing_storage_pdf(
         raise HTTPException(status_code=404, detail="Stored file not found on disk.")
     if ext == ".doc":
         raise HTTPException(status_code=400, detail="DOC files are not supported. Please re-upload as DOCX or PDF.")
-    if ext not in {".pdf", ".docx"}:
+    if ext not in INDEXABLE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only PDF or DOCX files can be indexed.")
-    pages = _pdf_pages_from_upload(content) if ext == ".pdf" else _docx_pages_from_upload(content)
-    if not pages:
-        raise HTTPException(status_code=400, detail="No extractable text was found in this file.")
-    documents, metadatas = _chunk_pdf_pages(pages)
-    if not documents:
-        raise HTTPException(status_code=400, detail="No extractable text chunks were found in this file.")
+
+    try:
+        prepared = prepare_indexable_document_from_existing(content=content, original_name=Path(stored_name).name, stored_name=stored_name)
+    except Exception as exc:
+        item.indexing_status = "failed"
+        item.indexing_error = str(exc)
+        item.updated_at = datetime.now(timezone.utc)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        raise HTTPException(status_code=400, detail=f"Text extraction failed: {exc}")
+
+    if not _rag_retrieval_ready():
+        raise HTTPException(status_code=409, detail="RAG indexing is not ready yet. Try again after the AI retriever starts.")
 
     from routers.chatbot import rag_chatbot
 
-    if rag_chatbot is None:
-        raise HTTPException(status_code=503, detail="AI Service unavailable.")
+    document_id = f"storage:{item.id}"
+
+    # Delete old vectors first (replace mode)
+    if replace_existing:
+        delete_document_vectors(rag_chatbot, document_id)
 
     normalized_level = str(item.level or "").strip() or None
     access_scope = _infer_access_scope(normalized_level)
-    college_text = _extract_college(normalized_level or "")
+    college_text = str(getattr(item, "college", "") or "").strip() or _extract_college(normalized_level or "")
     level_scope_value = _extract_level_scope_value(normalized_level or "")
     base_metadata = {
-        "document_id": f"storage:{item.id}",
+        "document_id": document_id,
         "source": "storage_pdf",
-        "source_type": "pdf" if ext == ".pdf" else "word",
+        "source_type": prepared.source_type,
         "access_scope": access_scope,
         "level": _normalize_scope_text(level_scope_value or normalized_level or "") or None,
         "college": college_text or None,
@@ -558,12 +590,33 @@ async def index_existing_storage_pdf(
         "owner_id": current_user.id,
         "stored_name": stored_name,
         "file_url": f"/api/storage/files/{stored_name}",
+        # Extended metadata
+        "program": str(getattr(item, "program", "") or "").strip() or None,
+        "academic_year": str(getattr(item, "academic_year", "") or "").strip() or None,
+        "semester": str(getattr(item, "semester", "") or "").strip() or None,
+        "keywords": str(getattr(item, "keywords", "") or "").strip() or None,
+        "priority": str(getattr(item, "priority", 0) or 0),
+        "content_type": str(getattr(item, "content_type", "") or "").strip() or None,
     }
+    # Remove None values
+    base_metadata = {k: v for k, v in base_metadata.items() if v is not None}
 
-    rag_chatbot.index_documents(documents, metadatas=[{**base_metadata, **meta} for meta in metadatas])
-    rag_chatbot.flush()
+    try:
+        index_prepared_document(rag_chatbot, prepared, base_metadata)
+    except Exception as exc:
+        item.indexing_status = "failed"
+        item.indexing_error = str(exc)
+        item.updated_at = datetime.now(timezone.utc)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        raise HTTPException(status_code=500, detail=f"Indexing failed: {exc}")
 
     item.is_indexed = True
+    item.indexing_status = "indexed"
+    item.indexing_error = None
+    item.extracted_text = prepared.extracted_text
+    item.chunks_count = len(prepared.documents)
     item.updated_at = datetime.now(timezone.utc)
     db.add(item)
     db.commit()
@@ -571,9 +624,11 @@ async def index_existing_storage_pdf(
 
     return {
         "item": StorageResponse.model_validate(item),
-        "pages_indexed": len(pages),
-        "chunks_indexed": len(documents),
+        "pages_indexed": len(prepared.pages),
+        "chunks_indexed": len(prepared.documents),
         "source": "storage_pdf",
+        "extracted_text_preview": (prepared.extracted_text[:500] + "...") if len(prepared.extracted_text) > 500 else prepared.extracted_text,
+        "extraction_warnings": prepared.extraction_warnings,
     }
 
 

@@ -15,6 +15,30 @@ input[type="number"]::-webkit-outer-spin-button {
   height: 0;
 }
 
+.places-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #05adcf rgba(148, 163, 184, 0.18);
+}
+
+.places-scroll::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+
+.places-scroll::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.14);
+  border-radius: 9999px;
+}
+
+.places-scroll::-webkit-scrollbar-thumb {
+  background: rgba(5, 173, 207, 0.9);
+  border-radius: 9999px;
+}
+
+.places-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(4, 137, 165, 0.95);
+}
+
 .campus-marker {
   cursor: pointer;
 }

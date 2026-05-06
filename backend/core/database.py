@@ -17,17 +17,36 @@ def _is_sqlite_url(database_url: str) -> bool:
     return str(database_url or "").startswith("sqlite")
 
 
-connect_args = {"check_same_thread": False} if _is_sqlite_url(settings.DATABASE_URL) else {}
+is_sqlite = _is_sqlite_url(settings.DATABASE_URL)
+
+if is_sqlite:
+    connect_args = {"check_same_thread": False}
+    engine_kwargs = {}
+else:
+    # Railway/Postgres connections may be dropped while idle. Keep connections short-lived
+    # and ask the driver to fail fast when the server becomes unreachable.
+    connect_args = {
+        "connect_timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    }
+    engine_kwargs = {
+        "pool_recycle": settings.DB_POOL_RECYCLE_SECONDS,
+        "pool_timeout": settings.DB_POOL_TIMEOUT_SECONDS,
+    }
 
 engine = create_engine(
     settings.DATABASE_URL,
     connect_args=connect_args,
     pool_pre_ping=True,
     echo=False,
+    **engine_kwargs,
 )
 
 
-if _is_sqlite_url(settings.DATABASE_URL):
+if is_sqlite:
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
@@ -36,7 +55,12 @@ if _is_sqlite_url(settings.DATABASE_URL):
         cursor.close()
 
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+    bind=engine,
+)
 
 
 class Base(DeclarativeBase):

@@ -3,12 +3,10 @@ Chatbot Router.
 Handles RAG AI chat sessions and generation.
 """
 
-from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import List, Optional
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
@@ -19,6 +17,7 @@ from core.deps import get_current_user, get_db, require_role
 from models.chatbot import ChatbotMessage, ChatbotSession
 from models.user import User
 from rag_chatbot import RAGChatbot
+from services.document_ingestion import ensure_upload_content, index_prepared_document, prepare_indexable_document
 
 router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 STORAGE_FILES_DIR = Path(__file__).resolve().parent.parent / "storage_files"
@@ -126,50 +125,6 @@ def _is_regulation_intent(query: str) -> bool:
     if any(term in text for term in _REGULATION_INTENT_TERMS):
         return True
     return bool(re.search(r"لا\S{0,2}ح\S*", text))
-
-
-def _pdf_pages_from_upload(content: bytes) -> List[dict]:
-    try:
-        from pypdf import PdfReader
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="pypdf is not installed on the server.") from exc
-
-    reader = PdfReader(BytesIO(content))
-    pages: List[dict] = []
-    for idx, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if not text:
-            continue
-        pages.append({"page": idx, "text": text})
-    return pages
-
-
-def _chunk_pdf_pages(pages: List[dict], chunk_size: int = 900, chunk_overlap: int = 120):
-    try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-    except Exception:
-        try:
-            from langchain.text_splitter import RecursiveCharacterTextSplitter
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail="Text splitter dependency is missing on the server.") from exc
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-
-    documents: List[str] = []
-    metadatas: List[dict] = []
-    for item in pages:
-        chunks = splitter.split_text(item["text"])
-        for chunk_idx, chunk in enumerate(chunks, start=1):
-            clean = " ".join(str(chunk or "").split())
-            if not clean:
-                continue
-            documents.append(clean)
-            metadatas.append({"page": item["page"], "chunk": chunk_idx})
-    return documents, metadatas
 
 
 @router.get("/sessions")
@@ -312,23 +267,8 @@ async def upload_pdf_to_rag(
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
     content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty file is not allowed.")
-    if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File is too large (max 20MB).")
-
-    # Persist file so UI can open it later when returned as an asset/source.
-    stored_name = f"{uuid4().hex}.pdf"
-    destination = STORAGE_FILES_DIR / stored_name
-    destination.write_bytes(content)
-
-    pages = _pdf_pages_from_upload(content)
-    if not pages:
-        raise HTTPException(status_code=400, detail="No extractable text was found in this PDF.")
-
-    documents, metadatas = _chunk_pdf_pages(pages)
-    if not documents:
-        raise HTTPException(status_code=400, detail="No indexable chunks were generated from this PDF.")
+    ensure_upload_content(content)
+    prepared = prepare_indexable_document(content=content, original_name=filename or "uploaded.pdf", storage_dir=STORAGE_FILES_DIR)
 
     source_name = str(source or "student_guide_pdf").strip().lower()
     scope = str(access_scope or "public").strip().lower()
@@ -341,14 +281,14 @@ async def upload_pdf_to_rag(
     normalized_student_id = str(student_id or "").strip()
 
     base_metadata = {
-        "document_id": f"{source_name}:{stored_name}",
+        "document_id": f"{source_name}:{prepared.stored_name}",
         "source": source_name,
         "source_type": "pdf",
         "access_scope": scope,
         "uploaded_by": str(current_user.id),
         "file_name": filename or "uploaded.pdf",
-        "stored_name": stored_name,
-        "file_url": f"/api/storage/files/{stored_name}",
+        "stored_name": prepared.stored_name,
+        "file_url": prepared.file_url,
     }
     if normalized_level:
         base_metadata["level"] = normalized_level
@@ -359,18 +299,15 @@ async def upload_pdf_to_rag(
     if normalized_student_id:
         base_metadata["student_id"] = normalized_student_id
 
-    merged_metadata = [{**meta, **base_metadata} for meta in metadatas]
-
-    rag_chatbot.index_documents(documents, merged_metadata)
-    rag_chatbot.flush()
+    index_prepared_document(rag_chatbot, prepared, base_metadata)
 
     return {
         "message": "PDF indexed successfully.",
         "file_name": filename,
-        "stored_name": stored_name,
-        "file_url": f"/api/storage/files/{stored_name}",
-        "pages_indexed": len(pages),
-        "chunks_indexed": len(documents),
+        "stored_name": prepared.stored_name,
+        "file_url": prepared.file_url,
+        "pages_indexed": len(prepared.pages),
+        "chunks_indexed": len(prepared.documents),
         "source": source_name,
         "access_scope": scope,
     }
@@ -387,9 +324,14 @@ async def rag_status():
             "retrieval_ready": False,
         }
     info = rag_chatbot.status()
+    retrieval_message = str(info.get("retrieval_message") or "").strip().lower()
+    if retrieval_message == "vector_store_not_initialized":
+        message = "RAG retrieval is not initialized. The embedding/vector store is unavailable."
+    else:
+        message = "RAG is ready." if info.get("retrieval_ready") else "RAG retrieval is not initialized."
     return {
         "ready": bool(info.get("retrieval_ready")),
-        "message": "RAG is ready." if info.get("retrieval_ready") else "RAG retrieval is not initialized.",
+        "message": message,
         **info,
     }
 
@@ -401,7 +343,18 @@ async def clear_rag_index():
         raise HTTPException(status_code=503, detail="AI Service unavailable.")
     result = rag_chatbot.clear_index()
     if not result.get("cleared"):
-        raise HTTPException(status_code=500, detail=f"Failed to clear RAG index: {result.get('reason', 'unknown error')}")
+        reason = str(result.get("reason") or "").strip().lower() or "unknown_error"
+        if reason == "vector_store_not_initialized":
+            raise HTTPException(
+                status_code=409,
+                detail="RAG retrieval is not initialized yet, so there is no active index to clear.",
+            )
+        if reason == "vector_store_rebuild_failed":
+            raise HTTPException(
+                status_code=503,
+                detail="RAG index directory was cleared, but the vector store could not be reinitialized.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to clear RAG index: {reason}")
     return {
         "message": "RAG index cleared successfully.",
         **result,

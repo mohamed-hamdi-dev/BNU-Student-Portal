@@ -175,6 +175,7 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [uploadingAttachment, setUploadingAttachment] = useState(false);
     const [indexedDocumentReady, setIndexedDocumentReady] = useState(false);
+    const [documentIndexingMessage, setDocumentIndexingMessage] = useState("");
     const imageInputRef = useRef(null);
     const fileInputRef = useRef(null);
     const editorRef = useRef(null);
@@ -220,6 +221,7 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
         setErrors({});
         setIsSubmitted(false);
         setIndexedDocumentReady(/\/api\/storage\/files\//i.test(String(nextForm.content || "")));
+        setDocumentIndexingMessage("");
         if (editorRef.current) editorRef.current.innerHTML = hydrateStoragePreviewHtml(nextForm.content || "");
     }, [initialData]);
 
@@ -348,10 +350,14 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
         const isPdf = file.type === "application/pdf" || extension === "pdf";
         const isDocx =
             file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || extension === "docx";
-        const finalizeInsert = (url) => {
+        const finalizeInsert = (url, indexingReady = true) => {
             const safeUrl = escapeHtml(url);
             const safeName = escapeHtml(file.name);
             const fileKindLabel = isPdf ? "PDF مرفق" : "Word مرفق";
+            const statusLabel = indexingReady ? "مفهرس للشات" : "مرفوع وبانتظار الفهرسة";
+            const statusStyle = indexingReady
+                ? "color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;"
+                : "color:#92400e;background:#fffbeb;border:1px solid #fcd34d;";
             focusEditor();
             document.execCommand(
                 "insertHTML",
@@ -363,7 +369,7 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
                     <div style="font-weight:700;font-size:12px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${safeName}</div>
                     <div style="font-size:10px;color:#64748b;display:flex;gap:8px;align-items:center;">
                       <span>${fileKindLabel}</span>
-                      <span style="color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:1px 6px;">مفهرس للشات</span>
+                      <span style="${statusStyle}border-radius:999px;padding:1px 6px;">${statusLabel}</span>
                     </div>
                   </div>
                   <a href="${safeUrl}" download="${safeName}" style="font-size:10px;color:#0891b2;text-decoration:none;border:1px solid #cfe7ef;padding:3px 7px;border-radius:7px;">تنزيل</a>
@@ -406,13 +412,15 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
             if (!uploadedUrl) {
                 throw new Error("تعذر رفع الملف. حاول مرة أخرى.");
             }
-            finalizeInsert(uploadedUrl);
+            const indexingReady = Boolean(uploaded?.indexing_ready);
+            finalizeInsert(uploadedUrl, indexingReady);
             setForm((prev) => ({
                 ...prev,
                 fileUrl: prev.fileUrl || uploadedUrl,
                 contentType: prev.contentType === "text" ? (isPdf ? "pdf" : "guide") : prev.contentType,
             }));
-            setIndexedDocumentReady(true);
+            setIndexedDocumentReady(indexingReady);
+            setDocumentIndexingMessage(String(uploaded?.message || "").trim());
         } catch (err) {
             setErrors((prev) => ({ ...prev, content: err?.message || "تعذر رفع الملف. تأكد من الاتصال وحاول مرة أخرى." }));
         } finally {
@@ -435,11 +443,6 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
         if (!hasText && !hasImage) {
             nextErrors.content = "المحتوى يجب أن يكون 10 أحرف على الأقل أو يحتوي على صورة.";
         }
-        const hasPdfLink = /\/api\/storage\/files\//i.test(String(form.content || ""));
-        if (requiresScopedTarget && hasPdfLink && !indexedDocumentReady) {
-            nextErrors.content = "الملف المرفوع غير مفهرس بعد. استخدم زر رفع وفهرسة المستند قبل الإرسال.";
-        }
-
         setErrors(nextErrors);
         return Object.keys(nextErrors).length === 0;
     };
@@ -467,6 +470,7 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
         setIsSubmitted(true);
         setForm(initialForm);
         setIndexedDocumentReady(false);
+        setDocumentIndexingMessage("");
         if (editorRef.current) editorRef.current.innerHTML = "";
         if (onFinish) onFinish();
     };
@@ -658,8 +662,14 @@ export default function CreateView({ initialData = null, onCreate, onUpdate, onF
                             {indexedDocumentReady && !uploadingAttachment && (
                                 <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">المستند مفهرس ✅</span>
                             )}
+                            {!indexedDocumentReady && !uploadingAttachment && documentIndexingMessage && (
+                                <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700">تم الرفع والفهرسة مؤجلة</span>
+                            )}
                             <span className="text-slate-500">{contentCounter} حرف</span>
                         </div>
+                        {!uploadingAttachment && !indexedDocumentReady && documentIndexingMessage && (
+                            <p className="mt-2 text-[11px] font-bold text-amber-600">{documentIndexingMessage}</p>
+                        )}
                     </div>
                 </div>
 

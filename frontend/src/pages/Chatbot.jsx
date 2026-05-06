@@ -2256,7 +2256,33 @@ function MapComponent() {
         {!!locationError && <p className="text-[11px] text-rose-500 text-center">{locationError}</p>}
       </div>}
 
-      {showSearchUI && showPlacesPanel && <div className="dot-scroll absolute z-[1004] top-[168px] left-1/2 -translate-x-1/2 w-[86%] max-w-md max-h-[40vh] overflow-y-auto bg-white/95 rounded-2xl border border-slate-200/70 shadow-sm p-2">{filtered.map((p) => <button key={p.id} onMouseEnter={() => { setDestination(p.position); setSelectedPlace(p); }} onClick={() => { setDestination(p.position); setSelectedPlace(p); setShowPlacesPanel(false); setShowSearchUI(false); }} className={`w-full text-right px-2.5 py-2 rounded-lg mb-1 border focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${selectedPlace?.id === p.id ? "bg-[#05ADCF]/10 border-[#05ADCF]/30" : "border-slate-100 hover:bg-slate-50"}`}><p className="font-bold text-slate-800 text-xs">{formatPlaceLabel(p)}</p><p className="text-[10px] text-slate-500 mt-0.5">{p.description}</p></button>)}</div>}
+      {showSearchUI && showPlacesPanel && (
+        <div className="absolute z-[1004] top-[168px] bottom-[84px] left-1/2 -translate-x-1/2 w-[86%] max-w-md overflow-hidden rounded-2xl border border-slate-200/70 bg-white/95 shadow-sm">
+          <div className="places-scroll h-full overflow-y-auto p-2" style={{ WebkitOverflowScrolling: "touch" }}>
+            {filtered.map((p) => (
+              <button
+                key={p.id}
+                onMouseEnter={() => {
+                  setDestination(p.position);
+                  setSelectedPlace(p);
+                }}
+                onClick={() => {
+                  setDestination(p.position);
+                  setSelectedPlace(p);
+                  setShowPlacesPanel(false);
+                  setShowSearchUI(false);
+                }}
+                className={`w-full text-right px-2.5 py-2 rounded-lg mb-1 border focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${
+                  selectedPlace?.id === p.id ? "bg-[#05ADCF]/10 border-[#05ADCF]/30" : "border-slate-100 hover:bg-slate-50"
+                }`}
+              >
+                <p className="font-bold text-slate-800 text-xs">{formatPlaceLabel(p)}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{p.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {routeInfo && <div className="absolute z-[1001] bottom-5 left-1/2 -translate-x-1/2 w-[90%] max-w-[320px] bg-white rounded-xl shadow-lg px-3 py-2 text-xs border border-slate-200/70" dir="rtl"><div className="font-semibold text-gray-800">{t("chatbot_route_details")}</div><div className="text-gray-600">{t("chatbot_distance")}: {routeInfo.distance} {t("chatbot_km")}</div><div className="text-gray-600">{t("chatbot_time")}: {routeInfo.time} {t("chatbot_min")}</div>{selectedPlace && <div className="text-[#05ADCF] font-bold mt-1">{t("chatbot_destination")}: {formatPlaceLabel(selectedPlace)}</div>}<div className="mt-2 flex items-center gap-2"><button onClick={cancelRoute} className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200">{t("chatbot_clear_route")}</button><button onClick={openInGoogleMaps} className="text-[11px] px-2.5 py-1 rounded-lg bg-[#05ADCF]/10 text-[#0489a5] hover:bg-[#05ADCF]/20 inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"><ExternalLink size={11} />Google Maps</button></div></div>}
 
       <MapContainer center={center} zoom={16} zoomControl={false} className="h-full w-full min-h-[460px]">

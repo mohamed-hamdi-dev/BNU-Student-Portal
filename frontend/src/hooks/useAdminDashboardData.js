@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { adminDashboardApi } from "../services/adminDashboardApi";
 
 const DEFAULT_DONUT_COLORS = ["#8B5CF6", "#FF8A80", "#22d3ee", "#a78bfa"];
@@ -67,16 +67,20 @@ const normalizeStorage = (item, index, usersById = new Map()) => {
     const ownerId = item?.owner_id ?? item?.ownerId ?? null;
     const ownerNameFromUsers = ownerId !== null ? usersById.get(String(ownerId)) || "" : "";
     return {
-    id: item?.id || index + 1,
-    fileName: item?.file_name || item?.fileName || item?.title || `File_${index + 1}`,
-    level: item?.level || "Level 1",
-    owner: item?.owner || item?.owner_name || ownerNameFromUsers || "Admin",
-    category: item?.category || "General Information",
-    date: item?.date || normalizeDate(item?.updated_at || item?.updatedAt || item?.created_at || item?.createdAt),
-    fav: Boolean(item?.is_favorite ?? item?.fav),
-    isIndexed: Boolean(item?.is_indexed ?? item?.isIndexed),
-    storedName: item?.stored_name ?? item?.storedName ?? null,
-};
+        id: item?.id || index + 1,
+        fileName: item?.file_name || item?.fileName || item?.title || `File_${index + 1}`,
+        level: item?.level || "Level 1",
+        owner: item?.owner || item?.owner_name || ownerNameFromUsers || "Admin",
+        category: item?.category || "General Information",
+        date: item?.date || normalizeDate(item?.updated_at || item?.updatedAt || item?.created_at || item?.createdAt),
+        fav: Boolean(item?.is_favorite ?? item?.fav),
+        isIndexed: Boolean(item?.is_indexed ?? item?.isIndexed),
+        indexingStatus: item?.indexing_status || "pending",
+        indexingError: item?.indexing_error || null,
+        extractedText: item?.extracted_text || null,
+        chunksCount: item?.chunks_count || 0,
+        storedName: item?.stored_name ?? item?.storedName ?? null,
+    };
 };
 
 const normalizeSettings = (settingsRow, fallbackProfile = {}) => ({

@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 import re
 import shutil
@@ -97,34 +97,43 @@ class RAGChatbot:
         self.max_conversations = max(10, int(os.getenv("RAG_MAX_CONVERSATIONS", "500")))
         self.max_history_messages_per_conversation = max(4, int(os.getenv("RAG_MAX_HISTORY_MESSAGES", "20")))
         self.history_turns_in_prompt = max(0, int(os.getenv("RAG_HISTORY_TURNS_IN_PROMPT", "6")))
-        self.retrieve_k = max(1, int(os.getenv("RAG_RETRIEVE_K", "4")))
-        self.strict_retrieval = os.getenv("RAG_STRICT_RETRIEVAL", "false").strip().lower() == "true"
+        self.retrieve_k = max(1, int(os.getenv("RAG_RETRIEVE_K", "6")))
+        self.strict_retrieval = os.getenv("RAG_STRICT_RETRIEVAL", "true").strip().lower() == "true"
         self.strict_scope_filter = os.getenv("RAG_STRICT_SCOPE_FILTER", "false").strip().lower() == "true"
+        self.allow_general_fallback = os.getenv("RAG_ALLOW_GENERAL_FALLBACK", "false").strip().lower() == "true"
 
         self.prompt = PromptTemplate(
             template=(
-                "أنت مساعد أكاديمي يعتمد فقط على النصوص المسترجعة.\n"
-                "إذا كانت الإجابة غير موجودة بوضوح في السياق، قل: لا أملك معلومة كافية من المستندات المتاحة.\n"
-                "لا تخمّن ولا تؤلف معلومات.\n\n"
+                "أنت مساعد أكاديمي جامعي تابع لجامعة بدر بالقاهرة الجديدة (BNU).\n"
+                "اعتمد أولاً وحصرياً على مصادر المعرفة المرفوعة في السياق أدناه.\n"
+                "لا تستخدم أي معرفة عامة أو خارجية. لا تخمّن ولا تؤلف معلومات.\n"
+                "إذا كانت الإجابة غير موجودة بوضوح في السياق، قل بالضبط:\n"
+                '"المعلومة غير موجودة في مصادر المعرفة الحالية."\n\n'
+                "قواعد مهمة:\n"
+                "- أجب باللغة العربية دائماً ما لم يطلب المستخدم غير ذلك.\n"
+                "- اذكر المصدر أو رقم الصفحة إن وجد في السياق.\n"
+                "- كن دقيقاً ومختصراً في الإجابة.\n\n"
                 "سجل المحادثة المختصر:\n{history}\n\n"
-                "السياق:\n{context}\n\n"
+                "السياق المسترجع من مصادر المعرفة:\n{context}\n\n"
                 "السؤال:\n{question}\n\n"
-                "الإجابة الدقيقة:"
+                "الإجابة (من المصادر فقط):"
             ),
             input_variables=["history", "context", "question"],
         )
         self.fallback_prompt = PromptTemplate(
             template=(
-                "You are a helpful university assistant.\n"
-                "Respond in the same language as the user.\n"
-                "If the user sends a greeting or casual message, reply naturally and briefly.\n"
-                "If the user asks for academic facts and no sources are available, ask for more context or documents.\n\n"
-                "Conversation summary:\n{history}\n\n"
-                "User message:\n{question}\n\n"
-                "Assistant reply:"
+                "أنت مساعد أكاديمي جامعي.\n"
+                "رد بنفس لغة المستخدم.\n"
+                "إذا أرسل المستخدم تحية أو رسالة عادية، رد بشكل طبيعي ومختصر.\n"
+                "إذا سأل عن معلومات أكاديمية ولا توجد مصادر متاحة، قل:\n"
+                '"المعلومة غير موجودة في مصادر المعرفة الحالية."\n\n'
+                "سجل المحادثة:\n{history}\n\n"
+                "رسالة المستخدم:\n{question}\n\n"
+                "الرد:"
             ),
             input_variables=["history", "question"],
         )
+
     def _initialize_vector_store(self):
         os.makedirs(self.persist_directory, exist_ok=True)
         try:
@@ -144,9 +153,11 @@ class RAGChatbot:
             self.vector_store = None
 
     def status(self) -> Dict[str, Any]:
+        retrieval_ready = self.vector_store is not None
         return {
             "llm_ready": self.llm is not None,
-            "retrieval_ready": self.vector_store is not None,
+            "retrieval_ready": retrieval_ready,
+            "retrieval_message": "ready" if retrieval_ready else "vector_store_not_initialized",
             "persist_directory": self.persist_directory,
             "conversation_count": len(self.conversations),
         }
@@ -171,7 +182,13 @@ class RAGChatbot:
             self.vector_store = None
             self._initialize_vector_store()
             self._pending_persist_docs = 0
-            return {"cleared": self.vector_store is not None, "mode": "rebuild_directory"}
+            if self.vector_store is None:
+                return {
+                    "cleared": False,
+                    "mode": "rebuild_directory",
+                    "reason": "vector_store_rebuild_failed",
+                }
+            return {"cleared": True, "mode": "rebuild_directory"}
         except Exception as rebuild_exc:
             self.logger.exception("Failed to rebuild vector store after clear: %s", rebuild_exc)
             return {"cleared": False, "reason": str(rebuild_exc)}
@@ -756,10 +773,21 @@ class RAGChatbot:
         has_context = bool(docs)
 
         if not has_context:
-            fallback_answer = (
-                "لا تتوفر مصادر معرفة مفعلة الآن للإجابة الدقيقة على هذا السؤال. "
-                "حاول مرة أخرى لاحقًا أو تواصل مع المسؤول لتفعيل مصادر النظام."
-            )
+            if not require_retrieval and self.allow_general_fallback:
+                # Only use general fallback if explicitly allowed
+                try:
+                    history_text = self._build_history_text(conversation_id)
+                    prompt_input = self.fallback_prompt.format(history=history_text, question=message)
+                    response = self.llm.invoke(prompt_input)
+                    fallback_answer = response.content if hasattr(response, "content") else str(response)
+                    fallback_answer += "\n\n⚠️ هذه إجابة عامة وليست من مصادر المعرفة المرفوعة."
+                except Exception:
+                    fallback_answer = "المعلومة غير موجودة في مصادر المعرفة الحالية."
+            else:
+                fallback_answer = (
+                    "المعلومة غير موجودة في مصادر المعرفة الحالية. "
+                    "يرجى التواصل مع المسؤول أو رفع المستند المناسب."
+                )
             sources = []
             self.conversations[conversation_id].append({"role": "assistant", "content": fallback_answer})
             self._trim_conversation_messages(conversation_id)
@@ -768,6 +796,8 @@ class RAGChatbot:
                 "conversation_id": conversation_id,
                 "sources": sources,
                 "retrieved_docs": [],
+                "rag_used": False,
+                "no_sources_found": True,
             }
         else:
             try:
@@ -797,6 +827,8 @@ class RAGChatbot:
             "conversation_id": conversation_id,
             "sources": sources,
             "retrieved_docs": retrieved_docs,
+            "rag_used": True,
+            "no_sources_found": False,
         }
     
     def get_conversation_history(self, conversation_id: str) -> List[Dict]:

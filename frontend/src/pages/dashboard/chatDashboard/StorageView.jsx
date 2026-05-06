@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Filter, MoreVertical, Plus, Search } from "lucide-react";
 import { useAccountRequestCatalog } from "../../../hooks/useAccountRequestCatalog";
 import { apiFetch } from "../../../services/api";
@@ -166,6 +166,9 @@ export default function StorageView({ data = [], createdContent = [], loading = 
   const [indexingId, setIndexingId] = useState(null);
   const [reuploadTarget, setReuploadTarget] = useState(null);
   const fileInputRef = useRef(null);
+  const [previewText, setPreviewText] = useState(null);
+  const [previewWarnings, setPreviewWarnings] = useState([]);
+  const [previewTitle, setPreviewTitle] = useState("");
 
   useEffect(() => {
     setItems(data);
@@ -355,6 +358,9 @@ export default function StorageView({ data = [], createdContent = [], loading = 
       formData.append("file_name", targetFileName || String(file.name || "").replace(/\.(pdf|docx)$/i, "").trim() || "مستند");
       formData.append("level", targetLevel || buildScopeLabel());
       formData.append("category", targetCategory || "General Information");
+      if (reuploadTarget?.id) {
+        formData.append("replace_existing", "true");
+      }
       const result = await apiFetch("/api/storage/upload-and-index", {
         method: "POST",
         body: formData,
@@ -377,6 +383,10 @@ export default function StorageView({ data = [], createdContent = [], loading = 
           date: formatToday(),
           fav: Boolean(created.is_favorite),
           isIndexed: Boolean(created.is_indexed),
+          indexingStatus: created.indexing_status || "pending",
+          indexingError: created.indexing_error,
+          extractedText: created.extracted_text,
+          chunksCount: created.chunks_count || 0,
           storedName: created.stored_name || null,
         };
         if (reuploadTarget?.id && onDelete) {
@@ -385,6 +395,11 @@ export default function StorageView({ data = [], createdContent = [], loading = 
         setItems((prev) =>
           [mapped, ...prev.filter((item) => item.id !== mapped.id && item.id !== reuploadTarget?.id)]
         );
+
+        if (result?.extraction_warnings?.length) {
+          setPreviewWarnings(result.extraction_warnings);
+          setPreviewTitle("تحذيرات رفع الملف");
+        }
       }
     } catch (err) {
       setActionError(err?.message || "تعذر رفع الملف وفهرسته.");
@@ -396,11 +411,17 @@ export default function StorageView({ data = [], createdContent = [], loading = 
   };
 
   const handleIndexNow = async (id) => {
-    if (!onIndex) return;
     setActionError("");
     try {
       setIndexingId(id);
-      const result = await onIndex(id);
+      
+      const formData = new FormData();
+      formData.append("replace_existing", "true");
+      const result = await apiFetch(`/api/storage/${id}/index`, {
+        method: "POST",
+        body: formData,
+      });
+
       const updated = result?.item || null;
       if (updated) {
         setItems((prev) =>
@@ -409,12 +430,20 @@ export default function StorageView({ data = [], createdContent = [], loading = 
               ? {
                   ...file,
                   isIndexed: Boolean(updated.is_indexed ?? updated.isIndexed),
+                  indexingStatus: updated.indexing_status || "pending",
+                  indexingError: updated.indexing_error,
+                  extractedText: updated.extracted_text,
+                  chunksCount: updated.chunks_count || 0,
                   storedName: updated.stored_name ?? updated.storedName ?? file.storedName ?? null,
                   date: formatToday(),
                 }
               : file
           )
         );
+        if (result?.extraction_warnings?.length) {
+          setPreviewWarnings(result.extraction_warnings);
+          setPreviewTitle("تحذيرات إعادة الفهرسة");
+        }
       } else {
         setItems((prev) => prev.map((file) => (Number(file.id) === Number(id) ? { ...file, isIndexed: true } : file)));
       }
@@ -556,14 +585,23 @@ export default function StorageView({ data = [], createdContent = [], loading = 
             </div>
 
             <div className="flex flex-wrap items-center gap-2 md:justify-end">
-              {indexableDocument ? (file.isIndexed ? (
+              {indexableDocument ? (file.indexingStatus === "indexed" || file.isIndexed ? (
                 <button
                   type="button"
                   disabled
                   className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700"
-                  title="الملف مفهرس وجاهز للردود"
+                  title={`الملف مفهرس وجاهز. عدد القطع: ${file.chunksCount || "غير معروف"}`}
                 >
                   جاهز للشات
+                </button>
+              ) : file.indexingStatus === "failed" ? (
+                <button
+                  onClick={() => (file.storedName ? handleIndexNow(file.id) : handleReuploadForItem(file))}
+                  disabled={indexingId === file.id || uploadingDocument}
+                  className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                  title={file.indexingError || "فشلت الفهرسة"}
+                >
+                  فشل (إعادة المحاولة)
                 </button>
               ) : (
                 <button
@@ -587,7 +625,17 @@ export default function StorageView({ data = [], createdContent = [], loading = 
                   <MoreVertical size={20} />
                 </button>
                 {menuOpenFor === file.id && (
-                  <div className={`absolute top-11 z-20 min-w-40 rounded-xl border border-slate-200 bg-white p-2 shadow-lg ${isRTL ? "left-0" : "right-0"}`}>
+                  <div className={`absolute top-11 z-20 min-w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-lg ${isRTL ? "left-0" : "right-0"}`}>
+                    {indexableDocument && (
+                      <button onClick={() => {
+                        setPreviewTitle(`معاينة النص: ${file.fileName}`);
+                        setPreviewText(file.extractedText || "لم يتم العثور على نص مستخرج. قد يكون الملف عبارة عن صور فقط (Scanned PDF) أو لم تتم فهرسته بعد.");
+                        setPreviewWarnings([]);
+                        setMenuOpenFor(null);
+                      }} className={`block w-full rounded-lg px-3 py-2 text-sm font-medium transition hover:bg-slate-100 ${isRTL ? "text-right" : "text-left"}`}>
+                        معاينة النص المستخرج
+                      </button>
+                    )}
                     <button onClick={() => { onOpenAdvancedEdit?.(file); setMenuOpenFor(null); }} className={`block w-full rounded-lg px-3 py-2 text-sm font-medium transition hover:bg-slate-100 ${isRTL ? "text-right" : "text-left"}`}>تعديل المحتوى</button>
                     <button onClick={() => openEdit(file.id)} className={`block w-full rounded-lg px-3 py-2 text-sm font-medium transition hover:bg-slate-100 ${isRTL ? "text-right" : "text-left"}`}>إعادة تسمية</button>
                     <button onClick={() => toggleFavorite(file.id)} className={`block w-full rounded-lg px-3 py-2 text-sm font-medium transition hover:bg-slate-100 ${isRTL ? "text-right" : "text-left"}`}>
@@ -608,6 +656,45 @@ export default function StorageView({ data = [], createdContent = [], loading = 
       {!filteredItems.length && !loading && <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-8 text-center text-sm font-bold text-slate-500">لا توجد ملفات مطابقة.</div>}
       {actionError && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{actionError}</div>}
       {loading && <div className="text-xs font-semibold text-slate-500">جاري تحميل بيانات التخزين...</div>}
+
+      {/* Preview Modal */}
+      {(previewText !== null || previewWarnings.length > 0) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-[32px] bg-white p-6 shadow-2xl">
+            <h3 className="mb-4 text-xl font-black">{previewTitle}</h3>
+            
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+              {previewWarnings.length > 0 && (
+                <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4">
+                  <h4 className="font-bold text-amber-800 mb-2">تنبيهات جودة الاستخراج:</h4>
+                  <ul className="list-disc list-inside text-sm text-amber-700 space-y-1">
+                    {previewWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                  <p className="mt-2 text-xs text-amber-600 font-bold">قد لا يتمكن الشات بوت من الإجابة بدقة من هذا الملف.</p>
+                </div>
+              )}
+              
+              {previewText !== null && (
+                <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-wrap border-2 border-slate-200 font-mono" dir="auto">
+                  {previewText}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => {
+                  setPreviewText(null);
+                  setPreviewWarnings([]);
+                }}
+                className="rounded-xl bg-slate-900 px-6 py-2.5 font-bold text-white transition hover:bg-slate-700"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
