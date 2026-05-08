@@ -336,6 +336,8 @@ async def rag_status():
     retrieval_message = str(info.get("retrieval_message") or "").strip().lower()
     if retrieval_message == "vector_store_not_initialized":
         message = "RAG retrieval is not initialized. The embedding/vector store is unavailable."
+    elif retrieval_message == "lazy_init_pending":
+        message = "RAG retrieval is configured and will initialize on first retrieval/indexing request."
     else:
         message = "RAG is ready." if info.get("retrieval_ready") else "RAG retrieval is not initialized."
     return {

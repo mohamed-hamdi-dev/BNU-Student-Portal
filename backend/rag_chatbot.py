@@ -74,6 +74,9 @@ class RAGChatbot:
         self.embeddings = None
         self.persist_directory = persist_directory
         self.vector_store = None
+        self._retrieval_supported = False
+        self._retrieval_init_attempted = False
+        self.eager_retrieval_init = os.getenv("RAG_EAGER_RETRIEVAL_INIT", "false").strip().lower() == "true"
         supports_retrieval = all([
             Chroma is not None,
             HuggingFaceEmbeddings is not None,
@@ -82,13 +85,14 @@ class RAGChatbot:
             StrOutputParser is not None,
             Document is not None,
         ])
+        self._retrieval_supported = supports_retrieval
 
         self._pending_persist_docs = 0
         self.persist_every_n_docs = max(1, int(os.getenv("RAG_PERSIST_EVERY_N_DOCS", "64")))
 
-        if supports_retrieval:
+        if supports_retrieval and self.eager_retrieval_init:
             self._initialize_vector_store()
-        else:
+        elif not supports_retrieval:
             self.logger.warning("Retrieval dependencies are missing. Running in direct LLM mode.")
 
         # Store conversation history (bounded in-memory cache)
@@ -135,6 +139,7 @@ class RAGChatbot:
         )
 
     def _initialize_vector_store(self):
+        self._retrieval_init_attempted = True
         os.makedirs(self.persist_directory, exist_ok=True)
         try:
             if self.embeddings is None:
@@ -152,17 +157,26 @@ class RAGChatbot:
             self.logger.exception("Could not initialize ChromaDB/HF embeddings: %s", e)
             self.vector_store = None
 
+    def _ensure_vector_store(self):
+        if self.vector_store is not None or not self._retrieval_supported:
+            return
+        self._initialize_vector_store()
+
     def status(self) -> Dict[str, Any]:
         retrieval_ready = self.vector_store is not None
+        retrieval_message = "ready" if retrieval_ready else "vector_store_not_initialized"
+        if not retrieval_ready and self._retrieval_supported and not self._retrieval_init_attempted:
+            retrieval_message = "lazy_init_pending"
         return {
             "llm_ready": self.llm is not None,
             "retrieval_ready": retrieval_ready,
-            "retrieval_message": "ready" if retrieval_ready else "vector_store_not_initialized",
+            "retrieval_message": retrieval_message,
             "persist_directory": self.persist_directory,
             "conversation_count": len(self.conversations),
         }
 
     def clear_index(self) -> Dict[str, Any]:
+        self._ensure_vector_store()
         if self.vector_store is None:
             return {"cleared": False, "reason": "vector_store_not_initialized"}
 
@@ -650,6 +664,7 @@ class RAGChatbot:
         return [item.get("doc") for item in scored if item.get("doc") is not None]
 
     def retrieve_scored_documents(self, message: str, retrieval_filter: Optional[Dict[str, Any]], k: Optional[int] = None) -> List[Dict[str, Any]]:
+        self._ensure_vector_store()
         if self.vector_store is None:
             return []
         query = str(message or "").strip()
@@ -761,6 +776,7 @@ class RAGChatbot:
             documents: List of text documents to index
             metadatas: Optional list of metadata dictionaries for each document
         """
+        self._ensure_vector_store()
         if not documents:
             return
         
@@ -797,6 +813,7 @@ class RAGChatbot:
 
     def flush(self):
         """Force persist pending vector changes."""
+        self._ensure_vector_store()
         if self.vector_store is None or not hasattr(self.vector_store, "persist"):
             return
         try:

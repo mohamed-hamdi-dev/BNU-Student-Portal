@@ -110,8 +110,11 @@ async def startup_event():
     # and knowledge chunks automatically.
     # We run this in the background so it doesn't block the server startup
     # and trigger Railway healthcheck timeouts.
-    import asyncio
-    asyncio.create_task(_auto_reindex_rag_on_startup())
+    auto_reindex_enabled = os.getenv("RAG_AUTO_REINDEX_ON_STARTUP", "false").strip().lower() == "true"
+    if auto_reindex_enabled:
+        asyncio.create_task(_auto_reindex_rag_on_startup())
+    else:
+        print("[RAG Startup] Auto reindex skipped. Set RAG_AUTO_REINDEX_ON_STARTUP=true to enable it.")
 
 
 async def _auto_reindex_rag_on_startup():
@@ -121,6 +124,10 @@ async def _auto_reindex_rag_on_startup():
     if startup_rag_chatbot is None:
         print("[RAG Startup] RAG chatbot not initialized, skipping auto-reindex.")
         return
+
+    ensure_vector_store = getattr(startup_rag_chatbot, "_ensure_vector_store", None)
+    if callable(ensure_vector_store):
+        ensure_vector_store()
 
     if startup_rag_chatbot.vector_store is None:
         print("[RAG Startup] Vector store not available, skipping auto-reindex.")
