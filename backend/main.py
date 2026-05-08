@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -107,7 +108,8 @@ async def startup_event():
     # ChromaDB is local/ephemeral on Railway, so after each deploy
     # the vector store is empty. This reindexes all stored documents
     # and knowledge chunks automatically.
-    await _auto_reindex_rag_on_startup()
+    # Run as background task so FastAPI can start serving immediately.
+    asyncio.create_task(_auto_reindex_rag_on_startup())
 
 
 async def _auto_reindex_rag_on_startup():
