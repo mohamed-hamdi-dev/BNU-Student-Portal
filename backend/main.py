@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -102,6 +102,185 @@ async def startup_event():
     finally:
         db.close()
     print("Database tables ensured.")
+
+    # ── Auto-reindex RAG on startup ──────────────────────────────
+    # ChromaDB is local/ephemeral on Railway, so after each deploy
+    # the vector store is empty. This reindexes all stored documents
+    # and knowledge chunks automatically.
+    await _auto_reindex_rag_on_startup()
+
+
+async def _auto_reindex_rag_on_startup():
+    """Re-index all storage documents and knowledge chunks into RAG if the vector store is empty."""
+    from routers.chatbot import rag_chatbot as startup_rag_chatbot
+
+    if startup_rag_chatbot is None:
+        print("[RAG Startup] RAG chatbot not initialized, skipping auto-reindex.")
+        return
+
+    if startup_rag_chatbot.vector_store is None:
+        print("[RAG Startup] Vector store not available, skipping auto-reindex.")
+        return
+
+    # Check if the vector store already has data
+    try:
+        col = getattr(startup_rag_chatbot.vector_store, "_collection", None)
+        if col is not None:
+            existing_count = col.count()
+            if existing_count > 0:
+                print(f"[RAG Startup] Vector store already has {existing_count} chunks, skipping auto-reindex.")
+                return
+        print("[RAG Startup] Vector store is empty, starting auto-reindex...")
+    except Exception as exc:
+        print(f"[RAG Startup] Could not check vector store count: {exc}, proceeding with reindex...")
+
+    db = SessionLocal()
+    total_indexed = 0
+    try:
+        from services.document_ingestion import (
+            prepare_indexable_document_from_existing,
+            index_prepared_document,
+        )
+        from routers.storage import (
+            _infer_access_scope,
+            _extract_college,
+            _extract_level_scope_value,
+            _normalize_scope_text,
+            _canonical_college_key,
+            _normalize_document_priority,
+            STORAGE_FILES_DIR,
+        )
+
+        # ── 1. Re-index StorageItem documents ──
+        items = db.query(StorageItem).filter(
+            StorageItem.stored_name.isnot(None),
+            StorageItem.stored_name != "",
+        ).all()
+
+        print(f"[RAG Startup] Found {len(items)} storage items to check for reindex.")
+
+        for item in items:
+            stored_name = str(item.stored_name or "").strip()
+            if not stored_name:
+                continue
+
+            ext = Path(stored_name).suffix.lower()
+            if ext not in {".pdf", ".docx"}:
+                continue
+
+            file_path = (STORAGE_FILES_DIR / Path(stored_name).name).resolve()
+
+            # Try file on disk first, then file_bytes from DB
+            content = None
+            if file_path.exists():
+                try:
+                    content = file_path.read_bytes()
+                except Exception:
+                    pass
+            if not content and item.file_bytes:
+                content = bytes(item.file_bytes)
+            if not content:
+                print(f"[RAG Startup]   ⚠ Skip item {item.id} ({item.file_name}): no file content available")
+                continue
+
+            try:
+                prepared = prepare_indexable_document_from_existing(
+                    content=content,
+                    original_name=Path(stored_name).name,
+                    stored_name=stored_name,
+                )
+            except Exception as exc:
+                print(f"[RAG Startup]   ⚠ Skip item {item.id} ({item.file_name}): extraction failed: {exc}")
+                continue
+
+            normalized_level = str(item.level or "").strip() or None
+            access_scope = _infer_access_scope(normalized_level)
+            college_text = str(getattr(item, "college", "") or "").strip() or _extract_college(normalized_level or "")
+            level_scope_value = _extract_level_scope_value(normalized_level or "")
+            normalized_content_type, normalized_priority = _normalize_document_priority(
+                file_name=str(item.file_name or stored_name).strip() or stored_name,
+                category=str(item.category or "").strip() or None,
+                content_type=str(getattr(item, "content_type", "") or "").strip() or None,
+                priority=int(getattr(item, "priority", 0) or 0),
+                keywords=str(getattr(item, "keywords", "") or "").strip() or None,
+            )
+
+            base_metadata = {
+                "document_id": f"storage:{item.id}",
+                "source": "storage_pdf",
+                "source_type": prepared.source_type,
+                "access_scope": access_scope,
+                "level": _normalize_scope_text(level_scope_value or normalized_level or "") or None,
+                "college": college_text or None,
+                "college_key": _canonical_college_key(college_text),
+                "category": str(item.category or "").strip().lower() or None,
+                "storage_item_id": item.id,
+                "storage_file_name": item.file_name,
+                "owner_id": item.owner_id,
+                "stored_name": stored_name,
+                "file_url": f"/api/storage/files/{stored_name}",
+                "program": str(getattr(item, "program", "") or "").strip() or None,
+                "academic_year": str(getattr(item, "academic_year", "") or "").strip() or None,
+                "semester": str(getattr(item, "semester", "") or "").strip() or None,
+                "keywords": str(getattr(item, "keywords", "") or "").strip() or None,
+                "priority": str(normalized_priority),
+                "content_type": normalized_content_type,
+            }
+            base_metadata = {k: v for k, v in base_metadata.items() if v is not None}
+
+            try:
+                index_prepared_document(startup_rag_chatbot, prepared, base_metadata)
+                total_indexed += len(prepared.documents)
+                print(f"[RAG Startup]   ✅ Indexed item {item.id} ({item.file_name}): {len(prepared.documents)} chunks")
+            except Exception as exc:
+                print(f"[RAG Startup]   ❌ Failed to index item {item.id} ({item.file_name}): {exc}")
+
+        # ── 2. Re-index Knowledge chunks ──
+        try:
+            from models.knowledge import KnowledgeChunk, KnowledgeDocument, ContentItem as KnowledgeContentItem
+
+            knowledge_chunks = db.query(KnowledgeChunk).all()
+            if knowledge_chunks:
+                print(f"[RAG Startup] Found {len(knowledge_chunks)} knowledge chunks to reindex.")
+                chunk_texts = []
+                chunk_metas = []
+                for chunk in knowledge_chunks:
+                    text = str(chunk.chunk_text or "").strip()
+                    if not text:
+                        continue
+                    chunk_texts.append(text)
+                    chunk_metas.append({
+                        "document_id": f"knowledge:{chunk.knowledge_document_id}",
+                        "source": "knowledge_text",
+                        "source_type": "text",
+                        "content_item_id": chunk.content_item_id,
+                        "knowledge_document_id": chunk.knowledge_document_id,
+                        "knowledge_chunk_id": chunk.id,
+                        "vector_ref": chunk.vector_ref,
+                        "college": chunk.college,
+                        "college_key": _canonical_college_key(chunk.college or ""),
+                        "level": chunk.year,
+                        "category": (chunk.subject or "").strip().lower() or None,
+                        "access_scope": "public",
+                    })
+
+                if chunk_texts:
+                    # Remove None values from all metadata dicts
+                    chunk_metas = [{k: v for k, v in m.items() if v is not None} for m in chunk_metas]
+                    startup_rag_chatbot.index_documents(chunk_texts, metadatas=chunk_metas)
+                    startup_rag_chatbot.flush()
+                    total_indexed += len(chunk_texts)
+                    print(f"[RAG Startup]   ✅ Indexed {len(chunk_texts)} knowledge chunks")
+        except Exception as exc:
+            print(f"[RAG Startup]   ⚠ Knowledge reindex skipped: {exc}")
+
+        print(f"[RAG Startup] Auto-reindex complete. Total chunks indexed: {total_indexed}")
+    except Exception as exc:
+        print(f"[RAG Startup] Auto-reindex failed: {exc}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        db.close()
 
 
 # ==================== GPA Calculator Endpoints ====================
@@ -971,7 +1150,18 @@ def _answer_bnu_facts_query(message: str) -> str:
     if not text:
         return ""
 
-    asks_about_bnu = any(token in text for token in ("بنها", "bnu", "benha", "الاهليه", "الأهلية"))
+    asks_about_bnu = any(
+        token in text
+        for token in (
+            "جامعه بنها الاهليه",
+            "جامعة بنها الأهلية",
+            "بنها",
+            "bnu",
+            "benha",
+            "الاهليه",
+            "الأهلية",
+        )
+    )
     asks_official_site = (
         ("موقع" in text and "رسمي" in text)
         or "الموقع الرسمي" in text
@@ -1487,6 +1677,10 @@ def _extract_primary_source_file(db: Session, sources: List[str]) -> Optional[st
 
 
 def _invoke_general_llm_answer(message: str, conversation_id: str) -> str:
+    bnu_facts_answer = _answer_bnu_facts_query(message)
+    if bnu_facts_answer:
+        return bnu_facts_answer
+
     llm = getattr(router_rag_chatbot, "llm", None)
     if llm is None:
         return "تعذر توليد الإجابة الآن. حاول مرة أخرى بعد قليل."
@@ -2348,6 +2542,167 @@ def _extract_regulation_answer_from_storage(db: Session, message: str, retrieval
     return top_text[:420].strip()
 
 
+def _fees_query_markers(message: str) -> List[str]:
+    normalized = _normalize_search_text(message or "")
+    markers: List[str] = []
+    if any(token in normalized for token in ("مصاريف", "المصاريف", "رسوم", "الرسوم", "fees", "tuition")):
+        markers.extend(["المصروفات الدراسية", "مصاريف كلية علوم الحاسب", "75 الف جنية مصري"])
+    if any(token in normalized for token in ("منح", "منحه", "scholarship")):
+        markers.extend(["المنح الدراسية", "منح التفوق", "منح التفوق الرياضي", "الطلاب المتميزين والمبدعين"])
+    if any(token in normalized for token in ("خصم", "تخفيض", "discount")):
+        markers.extend(["تخفيضات المصروفات الدراسية", "أبناء الشهداء", "الأخوة", "ذوي الهمم", "أعضاء هيئة التدريس"])
+    if any(token in normalized for token in ("دعم اجتماعي", "support")):
+        markers.extend(["الدعم الاجتماعي", "فقد عائله"])
+    return markers
+
+
+def _extract_fees_section_answer(text: str, message: str) -> str:
+    clean_text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean_text:
+        return ""
+
+    normalized_message = _normalize_search_text(message or "")
+
+    asks_tuition = any(token in normalized_message for token in ("مصاريف", "المصاريف", "رسوم", "الرسوم", "fees", "tuition"))
+    asks_scholarships = any(token in normalized_message for token in ("منح", "منحه", "scholarship"))
+    asks_discounts = any(token in normalized_message for token in ("خصم", "تخفيض", "discount"))
+    asks_social = any(token in normalized_message for token in ("دعم اجتماعي", "فقد عائله", "فقد عائله", "support"))
+
+    if asks_tuition:
+        tuition_match = re.search(
+            r"(?:المصروفات\s+الدراسية\s+لكلية\s+علوم\s+الحاسب[^\.:\n]{0,80}?75\s*الف\s*جني[هة]\s*مصري)",
+            clean_text,
+            re.IGNORECASE,
+        )
+        if tuition_match:
+            return re.sub(r"\s+", " ", tuition_match.group(0)).strip() + "."
+
+    anchors: List[str] = []
+    if asks_scholarships:
+        anchors.extend(["المنح الدراسية", "منح التفوق", "منح التفوق الرياضي", "الطلاب المتميزين والمبدعين"])
+    if asks_discounts:
+        anchors.extend(["تخفيضات المصروفات الدراسية", "أبناء الشهداء", "الأخوة", "أعضاء هيئة التدريس", "ذوي الهمم"])
+    if asks_social:
+        anchors.extend(["الدعم الاجتماعي", "فقد عائله"])
+    if asks_tuition and not anchors:
+        anchors.extend(["المصروفات الدراسية", "مصاريف كلية علوم الحاسب"])
+
+    for anchor in anchors:
+        match = re.search(re.escape(anchor), clean_text, re.IGNORECASE)
+        if not match:
+            continue
+        start = match.start()
+        end = min(len(clean_text), start + 700)
+        snippet = clean_text[start:end].strip(" |-\n\r\t")
+        boundary_match = re.search(r"(?:\sأولاً[:：]|\sثانياً[:：]|\sثالثاً[:：]|\sقواعد عامة)", snippet[40:])
+        if boundary_match and anchor not in {"المصروفات الدراسية", "المنح الدراسية"}:
+            snippet = snippet[: 40 + boundary_match.start()].strip(" |-\n\r\t")
+        if len(snippet) >= 20:
+            return snippet[:520].strip()
+
+    return ""
+
+
+def _retrieve_fee_chunks_from_storage(
+    db: Session,
+    message: str,
+    limit: int = 8,
+) -> List[dict]:
+    normalized_message = _normalize_search_text(message or "")
+    query_tokens = [tok for tok in normalized_message.split() if len(tok) >= 3]
+    marker_terms = [_normalize_search_text(item) for item in _fees_query_markers(message) if _normalize_search_text(item)]
+    if not query_tokens and not marker_terms:
+        return []
+
+    rows = (
+        db.query(StorageItem)
+        .filter(
+            (StorageItem.category == "fees")
+            | (StorageItem.file_name.ilike("%مصاريف%"))
+            | (StorageItem.file_name.ilike("%رسوم%"))
+            | (StorageItem.file_name.ilike("%fees%"))
+            | (StorageItem.file_name.ilike("%tuition%"))
+        )
+        .order_by(StorageItem.priority.desc(), StorageItem.updated_at.desc())
+        .all()
+    )
+
+    scored_chunks: List[dict] = []
+    for item in rows:
+        item_text = str(getattr(item, "extracted_text", "") or "").strip()
+        if not item_text:
+            continue
+        file_url = f"/api/storage/files/{str(getattr(item, 'stored_name', '') or '').strip()}" if str(getattr(item, "stored_name", "") or "").strip() else ""
+        text_chunks = _split_storage_extracted_text(item_text)
+        for chunk_index, chunk_text in enumerate(text_chunks, start=1):
+            normalized_chunk = _normalize_search_text(chunk_text)
+            overlap = sum(1 for tok in query_tokens if tok in normalized_chunk)
+            marker_hits = sum(1 for marker in marker_terms if marker in normalized_chunk)
+            if overlap <= 0 and marker_hits <= 0:
+                continue
+            score = min(0.95, (0.12 * overlap) + (0.20 * marker_hits))
+            metadata = {
+                "document_id": f"storage:{item.id}",
+                "source": "storage_pdf",
+                "source_type": str(getattr(item, "source_type", "") or "word"),
+                "storage_item_id": int(getattr(item, "id", 0) or 0),
+                "storage_file_name": str(getattr(item, "file_name", "") or "").strip(),
+                "stored_name": str(getattr(item, "stored_name", "") or "").strip(),
+                "file_url": file_url,
+                "content_type": str(getattr(item, "content_type", "") or "").strip().lower() or "general",
+                "priority": str(getattr(item, "priority", 0) or 0),
+                "page": 1,
+                "chunk": chunk_index,
+                "access_scope": "public",
+                "level": "all",
+                "category": str(getattr(item, "category", "") or "").strip().lower() or None,
+            }
+            doc = SimpleNamespace(page_content=chunk_text, metadata={k: v for k, v in metadata.items() if v is not None})
+            scored_chunks.append(
+                {
+                    "doc": doc,
+                    "score": score,
+                    "base_score": score,
+                    "raw_score": score,
+                    "score_kind": "storage_text",
+                    "metadata": dict(doc.metadata),
+                    "applied_filter": {"category": "fees"},
+                }
+            )
+
+    scored_chunks.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return scored_chunks[: max(1, int(limit or 8))]
+
+
+def _extract_fees_answer_from_storage(db: Session, message: str) -> str:
+    rows = (
+        db.query(StorageItem)
+        .filter(
+            (StorageItem.category == "fees")
+            | (StorageItem.file_name.ilike("%مصاريف%"))
+            | (StorageItem.file_name.ilike("%رسوم%"))
+            | (StorageItem.file_name.ilike("%fees%"))
+            | (StorageItem.file_name.ilike("%tuition%"))
+        )
+        .order_by(StorageItem.priority.desc(), StorageItem.updated_at.desc())
+        .all()
+    )
+    for item in rows:
+        answer = _extract_fees_section_answer(str(getattr(item, "extracted_text", "") or ""), message)
+        if answer:
+            return answer
+
+    storage_chunks = _retrieve_fee_chunks_from_storage(db=db, message=message, limit=10)
+    if not storage_chunks:
+        return ""
+    answer = _extractive_academic_answer(message, storage_chunks)
+    if answer:
+        return answer
+    top_doc = storage_chunks[0].get("doc")
+    top_text = re.sub(r"\s+", " ", str(getattr(top_doc, "page_content", "") or "")).strip()
+    return top_text[:420].strip()
+
+
 def _load_all_chunks_for_document(document_id: str) -> List[dict]:
     vector_store = getattr(router_rag_chatbot, "vector_store", None)
     if vector_store is None or not document_id:
@@ -2518,6 +2873,18 @@ async def legacy_chat_endpoint(
             debug_info["grounded"] = True
             debug_info["fallback_triggered"] = True
             debug_info["decision_reason"] = "Answered from trusted built-in BNU facts before RAG/LLM."
+
+    if not response_text and response_type not in {"INDEXING", "SYSTEM"}:
+        fees_answer = _extract_fees_answer_from_storage(db=db, message=raw_message)
+        if fees_answer:
+            response_type = "ACADEMIC"
+            response_text = fees_answer
+            source_name = "مصاريف كلية علوم الحاسب"
+            actions = ["عرض الملف"]
+            debug_info["grounded"] = True
+            debug_info["fallback_triggered"] = True
+            debug_info["retrieval_source_used"] = "storage_pdf"
+            debug_info["decision_reason"] = "Answered directly from indexed fees document before general RAG composition."
 
     display_intent = response_type != "INDEXING" and _detect_display_intent(raw_message)
     if response_type not in {"INDEXING", "SYSTEM"} and display_intent:
