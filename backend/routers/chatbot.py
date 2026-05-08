@@ -213,7 +213,7 @@ async def chat_with_ai(
                 "student_id": str(current_user.id),
                 "level": _normalize_scope_text(getattr(current_user, "level", "") or ""),
                 "college_key": _canonical_college_key(getattr(current_user, "college", "") or ""),
-                "sources": ["student_guide_pdf", "storage_pdf"],
+                "sources": ["student_guide_pdf", "storage_pdf", "knowledge_text"],
             }
             if is_regulation_query:
                 retrieval_filter = {**base_retrieval_filter, "preferred_content_type": "regulation", "content_type": "regulation"}
