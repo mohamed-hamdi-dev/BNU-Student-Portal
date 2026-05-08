@@ -244,6 +244,62 @@ class RAGChatbot:
             return "جميل. هل تحب أساعدك في شيء دراسي أو إداري؟"
         return None
 
+    def _is_regulation_query(self, message: str) -> bool:
+        text = self._normalize_scope_text(message)
+        if not text:
+            return False
+        terms = (
+            "لايحه",
+            "لائحه",
+            "لائحة",
+            "regulation",
+            "bylaw",
+            "credit hours",
+            "الساعات المعتمده",
+            "الساعات المعتمدة",
+            "انذار",
+            "إنذار",
+            "الفصل",
+            "التظلم",
+            "الحذف",
+            "الاضافه",
+            "الإضافة",
+            "الاضافة",
+            "الانسحاب",
+            "التخرج",
+            "التقدير",
+        )
+        return any(term in text for term in terms)
+
+    def _metadata_priority_value(self, metadata: Dict[str, Any]) -> int:
+        try:
+            return int(str(metadata.get("priority", 0) or 0).strip())
+        except Exception:
+            return 0
+
+    def _metadata_content_type(self, metadata: Dict[str, Any]) -> str:
+        return str(metadata.get("content_type") or "").strip().lower()
+
+    def _looks_like_regulation_document(self, metadata: Dict[str, Any]) -> bool:
+        if self._metadata_content_type(metadata) == "regulation":
+            return True
+
+        for field in ("file_name", "storage_file_name", "keywords", "category", "source"):
+            value = self._normalize_scope_text(metadata.get(field))
+            if any(term in value for term in ("لايحه", "لائحه", "regulation", "bylaw", "student regulations")):
+                return True
+        return False
+
+    def _score_with_priority_boost(self, base_score: float, metadata: Dict[str, Any], message: str) -> float:
+        boosted = float(base_score or 0.0)
+        priority_value = max(0, min(self._metadata_priority_value(metadata), 100))
+        boosted += (priority_value / 100.0) * 0.20
+
+        if self._is_regulation_query(message) and self._looks_like_regulation_document(metadata):
+            boosted += 0.18
+
+        return boosted
+
     def _canonical_college_key(self, value: Any) -> str:
         text = self._normalize_scope_text(value)
         if not text:
@@ -461,6 +517,8 @@ class RAGChatbot:
         level_variants = self._expand_level_variants(level)
         category = str(retrieval_filter.get("category") or "").strip().lower()
         college_key = self._canonical_college_key(retrieval_filter.get("college") or retrieval_filter.get("college_key"))
+        preferred_content_type = str(retrieval_filter.get("preferred_content_type") or "").strip().lower()
+        exact_content_type = str(retrieval_filter.get("content_type") or "").strip().lower()
         raw_sources = retrieval_filter.get("sources")
         if raw_sources is None:
             raw_sources = [retrieval_filter.get("source")] if retrieval_filter.get("source") else []
@@ -468,13 +526,54 @@ class RAGChatbot:
             raw_sources = [raw_sources]
         sources = [str(item or "").strip().lower() for item in raw_sources if str(item or "").strip()]
 
+        extra_exact_fields: Dict[str, Any] = {}
+        if category:
+            extra_exact_fields["category"] = category
+        if exact_content_type:
+            extra_exact_fields["content_type"] = exact_content_type
+
+        preferred_filters: List[Dict[str, Any]] = []
+        if preferred_content_type:
+            preferred_fields: Dict[str, Any] = {"content_type": preferred_content_type}
+            if category:
+                preferred_fields["category"] = category
+
+            if level_variants and college_key:
+                for lvl in level_variants:
+                    base_filter = {"access_scope": "level", "level": lvl, "college_key": college_key, **preferred_fields}
+                    preferred_filters.append(base_filter)
+                    for source in sources:
+                        preferred_filters.append({**base_filter, "source": source})
+
+            if level_variants and not college_key:
+                for lvl in level_variants:
+                    base_filter = {"access_scope": "level", "level": lvl, **preferred_fields}
+                    preferred_filters.append(base_filter)
+                    for source in sources:
+                        preferred_filters.append({**base_filter, "source": source})
+
+            if college_key:
+                base_filter = {"access_scope": "level", "college_key": college_key, **preferred_fields}
+                preferred_filters.append(base_filter)
+                for source in sources:
+                    preferred_filters.append({**base_filter, "source": source})
+
+            public_preferred = {"access_scope": "public", **preferred_fields}
+            if sources:
+                for source in sources:
+                    preferred_filters.append({**public_preferred, "source": source})
+            else:
+                preferred_filters.append(public_preferred)
+
+            for source in sources:
+                preferred_filters.append({"source": source, "content_type": preferred_content_type})
+
         filters: List[Dict[str, Any]] = []
         # Student academic scope docs
         if level_variants and college_key:
             for lvl in level_variants:
                 f = {"access_scope": "level", "level": lvl, "college_key": college_key}
-                if category:
-                    f["category"] = category
+                f.update(extra_exact_fields)
                 filters.append(f)
                 for source in sources:
                     scoped_level_filter = dict(f)
@@ -483,8 +582,7 @@ class RAGChatbot:
         if level_variants and not college_key:
             for lvl in level_variants:
                 f = {"access_scope": "level", "level": lvl}
-                if category:
-                    f["category"] = category
+                f.update(extra_exact_fields)
                 filters.append(f)
                 for source in sources:
                     scoped_level_filter = dict(f)
@@ -492,8 +590,7 @@ class RAGChatbot:
                     filters.append(scoped_level_filter)
         if college_key:
             f = {"access_scope": "level", "college_key": college_key}
-            if category:
-                f["category"] = category
+            f.update(extra_exact_fields)
             filters.append(f)
             for source in sources:
                 scoped_college_filter = dict(f)
@@ -501,8 +598,7 @@ class RAGChatbot:
                 filters.append(scoped_college_filter)
         # Public docs
         public_filter: Dict[str, Any] = {"access_scope": "public"}
-        if category:
-            public_filter["category"] = category
+        public_filter.update(extra_exact_fields)
         if sources:
             for source in sources:
                 scoped_public_filter = dict(public_filter)
@@ -515,7 +611,12 @@ class RAGChatbot:
             if not any(f.get("source") == source for f in filters):
                 filters.append({"source": source})
         if category and not any(f.get("category") == category for f in filters):
-            filters.append({"category": category})
+            category_filter = {"category": category}
+            if exact_content_type:
+                category_filter["content_type"] = exact_content_type
+            filters.append(category_filter)
+        if exact_content_type and not any(f.get("content_type") == exact_content_type for f in filters):
+            filters.append({"content_type": exact_content_type})
 
         # Optional fallback for legacy docs with missing metadata.
         if not self.strict_scope_filter:
@@ -523,7 +624,7 @@ class RAGChatbot:
 
         unique_filters: List[Optional[Dict[str, Any]]] = []
         seen = set()
-        for item in filters:
+        for item in [*preferred_filters, *filters]:
             key = tuple(sorted((item or {}).items()))
             if key in seen:
                 continue
@@ -557,6 +658,8 @@ class RAGChatbot:
 
         target_k = int(k or max(self.retrieve_k, 12))
         filters = self._build_scope_filters(retrieval_filter)
+        collected: List[Dict[str, Any]] = []
+        seen_chunks: set[tuple[str, str, str, str]] = set()
         for where in filters:
             try:
                 chroma_where = self._to_chroma_where(where)
@@ -589,34 +692,42 @@ class RAGChatbot:
                     docs = retriever.invoke(query)
                     scored_pairs = [(doc, 0.0) for doc in docs]
 
-                scored_docs: List[Dict[str, Any]] = []
                 for doc, score in (scored_pairs or []):
                     metadata = dict(getattr(doc, "metadata", {}) or {})
                     normalized_score = self._normalize_retrieval_score(score, score_kind=score_kind)
+                    boosted_score = self._score_with_priority_boost(normalized_score, metadata, query)
                     self.logger.info(
-                        "RAG score normalization | raw_score=%s | normalized_score=%.6f | detected_type=%s",
+                        "RAG score normalization | raw_score=%s | normalized_score=%.6f | boosted_score=%.6f | detected_type=%s",
                         score,
                         normalized_score,
+                        boosted_score,
                         score_kind,
                     )
-                    scored_docs.append(
+                    chunk_key = (
+                        str(metadata.get("document_id") or ""),
+                        str(metadata.get("page") or ""),
+                        str(metadata.get("chunk") or ""),
+                        str(getattr(doc, "page_content", "") or "")[:120],
+                    )
+                    if chunk_key in seen_chunks:
+                        continue
+                    seen_chunks.add(chunk_key)
+                    collected.append(
                         {
                             "doc": doc,
-                            "score": normalized_score,
+                            "score": boosted_score,
+                            "base_score": normalized_score,
                             "raw_score": score,
                             "score_kind": score_kind,
                             "metadata": metadata,
                             "applied_filter": dict(where or {}),
                         }
                     )
-
-                if scored_docs:
-                    scored_docs.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
-                    return scored_docs
             except Exception as exc:
                 self.logger.warning("Retriever failed for filter %s: %s", where, exc)
                 continue
-        return []
+        collected.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+        return collected[:target_k]
 
     def _compact_source(self, doc: Any) -> str:
         meta = dict(getattr(doc, "metadata", {}) or {})
@@ -710,8 +821,11 @@ class RAGChatbot:
         conversation_id: Optional[str] = None,
         student_id: Optional[str] = None,
         retrieval_filter: Optional[Dict[str, Any]] = None,
+        fallback_retrieval_filter: Optional[Dict[str, Any]] = None,
         require_retrieval: Optional[bool] = None,
         retrieve_context: bool = True,
+        min_retrieval_score: Optional[float] = None,
+        allow_general_fallback_override: Optional[bool] = None,
     ) -> Dict:
         """
         Chat with the RAG chatbot.
@@ -769,11 +883,23 @@ class RAGChatbot:
                 }
         
         # Retrieve context with scope filtering only when requested by caller.
-        docs = self._retrieve_documents(message, retrieval_filter=retrieval_filter) if retrieve_context else []
+        scored_docs = self.retrieve_scored_documents(message, retrieval_filter=retrieval_filter) if retrieve_context else []
+        score_threshold = float(min_retrieval_score) if min_retrieval_score is not None else 0.0
+        top_score = float(scored_docs[0].get("score") or 0.0) if scored_docs else 0.0
+
+        if retrieve_context and fallback_retrieval_filter and (not scored_docs or top_score < score_threshold):
+            fallback_scored_docs = self.retrieve_scored_documents(message, retrieval_filter=fallback_retrieval_filter)
+            fallback_top_score = float(fallback_scored_docs[0].get("score") or 0.0) if fallback_scored_docs else 0.0
+            if fallback_scored_docs and (not scored_docs or fallback_top_score >= top_score):
+                scored_docs = fallback_scored_docs
+                top_score = fallback_top_score
+
+        docs = [item.get("doc") for item in scored_docs if item.get("doc") is not None]
         has_context = bool(docs)
+        allow_general_fallback = self.allow_general_fallback if allow_general_fallback_override is None else bool(allow_general_fallback_override)
 
         if not has_context:
-            if not require_retrieval and self.allow_general_fallback:
+            if allow_general_fallback:
                 # Only use general fallback if explicitly allowed
                 try:
                     history_text = self._build_history_text(conversation_id)
@@ -811,12 +937,20 @@ class RAGChatbot:
                 response = self.llm.invoke(prompt_input)
                 answer = response.content if hasattr(response, "content") else str(response)
                 sources = [self._compact_source(doc) for doc in docs]
-                retrieved_docs = [dict(getattr(doc, "metadata", {}) or {}) for doc in docs]
+                retrieved_docs = [
+                    {**dict(getattr(item.get("doc"), "metadata", {}) or {}), "_score": item.get("score"), "_base_score": item.get("base_score")}
+                    for item in scored_docs
+                    if item.get("doc") is not None
+                ]
             except Exception as exc:
                 self.logger.exception("LLM invoke failed: %s", exc)
                 answer = "تعذر توليد الإجابة الآن. حاول مرة أخرى بعد قليل."
                 sources = [self._compact_source(doc) for doc in docs]
-                retrieved_docs = [dict(getattr(doc, "metadata", {}) or {}) for doc in docs]
+                retrieved_docs = [
+                    {**dict(getattr(item.get("doc"), "metadata", {}) or {}), "_score": item.get("score"), "_base_score": item.get("base_score")}
+                    for item in scored_docs
+                    if item.get("doc") is not None
+                ]
 
         # Add assistant response to history
         self.conversations[conversation_id].append({"role": "assistant", "content": answer})

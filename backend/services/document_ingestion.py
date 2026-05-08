@@ -5,7 +5,7 @@ import zipfile
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -170,6 +170,164 @@ def _check_extraction_quality(extracted_text: str, original_name: str) -> List[s
     return warnings
 
 
+def _docx_namespace() -> dict[str, str]:
+    return {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+
+def _docx_local_name(tag: str) -> str:
+    return str(tag or "").split("}", 1)[-1]
+
+
+def _docx_join_text_nodes(element: ET.Element, namespace: dict[str, str]) -> str:
+    fragments: List[str] = []
+    for node in element.iter():
+        local_name = _docx_local_name(node.tag)
+        if local_name == "t" and node.text:
+            fragments.append(node.text)
+        elif local_name == "tab":
+            fragments.append("\t")
+        elif local_name in {"br", "cr"}:
+            fragments.append("\n")
+    return _clean_arabic_text("".join(fragments))
+
+
+def _docx_extract_table_lines(table: ET.Element, namespace: dict[str, str]) -> List[str]:
+    lines: List[str] = []
+    for row in table.findall("./w:tr", namespace):
+        cells: List[str] = []
+        for cell in row.findall("./w:tc", namespace):
+            fragments: List[str] = []
+            for paragraph in cell.findall(".//w:p", namespace):
+                text = _docx_join_text_nodes(paragraph, namespace)
+                if text:
+                    fragments.append(text)
+            cell_text = _clean_arabic_text(" ".join(fragments))
+            if cell_text:
+                cells.append(cell_text)
+        if cells:
+            lines.append(" | ".join(cells))
+    return lines
+
+
+def _docx_extract_block_lines(root: ET.Element) -> List[str]:
+    namespace = _docx_namespace()
+    container = None
+    for path in ("./w:body", "./w:hdr", "./w:ftr", "./w:footnotes", "./w:endnotes"):
+        container = root.find(path, namespace)
+        if container is not None:
+            break
+    if container is None:
+        container = root
+
+    lines: List[str] = []
+    for child in list(container):
+        local_name = _docx_local_name(child.tag)
+        if local_name == "p":
+            text = _docx_join_text_nodes(child, namespace)
+            if text:
+                lines.append(text)
+        elif local_name == "tbl":
+            lines.extend(_docx_extract_table_lines(child, namespace))
+
+    if lines:
+        return lines
+
+    fallback_lines: List[str] = []
+    for paragraph in root.findall(".//w:p", namespace):
+        text = _docx_join_text_nodes(paragraph, namespace)
+        if text:
+            fallback_lines.append(text)
+    return fallback_lines
+
+
+def _docx_relevant_part_names(archive: zipfile.ZipFile) -> List[str]:
+    preferred = [
+        "word/document.xml",
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+    ]
+    names = set(archive.namelist())
+    ordered = [name for name in preferred if name in names]
+    ordered.extend(sorted(name for name in names if name.startswith("word/header") and name.endswith(".xml")))
+    ordered.extend(sorted(name for name in names if name.startswith("word/footer") and name.endswith(".xml")))
+    return ordered
+
+
+def _merge_unique_docx_lines(parts: Iterable[str]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        clean = _clean_arabic_text(part)
+        if not clean:
+            continue
+        if clean in seen:
+            continue
+        merged.append(clean)
+        seen.add(clean)
+    return merged
+
+
+def _extract_docx_text_lines(content: bytes) -> List[str]:
+    primary_lines: List[str] = []
+
+    try:
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument(BytesIO(content))
+        for para in doc.paragraphs:
+            text = _clean_arabic_text(para.text)
+            if text:
+                primary_lines.append(text)
+
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [_clean_arabic_text(cell.text) for cell in row.cells if _clean_arabic_text(cell.text)]
+                if cells:
+                    primary_lines.append(" | ".join(cells))
+
+        for section in doc.sections:
+            for container in (section.header, section.footer):
+                for para in getattr(container, "paragraphs", []):
+                    text = _clean_arabic_text(getattr(para, "text", ""))
+                    if text:
+                        primary_lines.append(text)
+                for table in getattr(container, "tables", []):
+                    for row in table.rows:
+                        cells = [_clean_arabic_text(cell.text) for cell in row.cells if _clean_arabic_text(cell.text)]
+                        if cells:
+                            primary_lines.append(" | ".join(cells))
+    except ImportError:
+        pass
+
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            part_names = _docx_relevant_part_names(archive)
+            if not part_names:
+                raise HTTPException(status_code=400, detail="The DOCX file does not contain readable XML parts.")
+
+            supplemental_lines: List[str] = []
+            for part_name in part_names:
+                try:
+                    root = ET.fromstring(archive.read(part_name))
+                except ET.ParseError as exc:
+                    raise HTTPException(status_code=400, detail=f"Could not parse DOCX part: {part_name}") from exc
+                supplemental_lines.extend(_docx_extract_block_lines(root))
+
+            merged_lines = _merge_unique_docx_lines(primary_lines)
+            seen = set(merged_lines)
+            for line in supplemental_lines:
+                clean = _clean_arabic_text(line)
+                if not clean or clean in seen:
+                    continue
+                merged_lines.append(clean)
+                seen.add(clean)
+            return merged_lines
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail="The DOCX file does not contain a readable document body.") from exc
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="Invalid DOCX file.") from exc
+
+
 def prepare_indexable_document(content: bytes, original_name: str, storage_dir: Path) -> IndexedDocumentPayload:
     extension = Path(original_name).suffix.lower()
     stored_name, _ = save_uploaded_binary(content, original_name, storage_dir)
@@ -315,50 +473,8 @@ def _pdf_pages_from_upload(content: bytes) -> List[dict]:
 
 
 def _docx_pages_from_upload(content: bytes) -> List[dict]:
-    try:
-        from docx import Document as DocxDocument
-
-        doc = DocxDocument(BytesIO(content))
-        paragraphs: List[str] = []
-        for para in doc.paragraphs:
-            text = (para.text or "").strip()
-            if text:
-                paragraphs.append(text)
-
-        # Also extract tables
-        for table in doc.tables:
-            for row in table.rows:
-                cells = [_clean_arabic_text(cell.text) for cell in row.cells if cell.text.strip()]
-                if cells:
-                    paragraphs.append(" | ".join(cells))
-
-        merged = "\n".join(paragraphs).strip()
-        if not merged:
-            return []
-        return [{"page": 1, "text": merged}]
-    except ImportError:
-        try:
-            with zipfile.ZipFile(BytesIO(content)) as archive:
-                document_xml = archive.read("word/document.xml")
-        except KeyError as exc:
-            raise HTTPException(status_code=400, detail="The DOCX file does not contain a readable document body.") from exc
-        except zipfile.BadZipFile as exc:
-            raise HTTPException(status_code=400, detail="Invalid DOCX file.") from exc
-
-        try:
-            root = ET.fromstring(document_xml)
-        except ET.ParseError as exc:
-            raise HTTPException(status_code=400, detail="Could not parse DOCX content.") from exc
-
-        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-        paragraphs: List[str] = []
-        for para in root.findall(".//w:p", namespace):
-            texts = [node.text for node in para.findall(".//w:t", namespace) if node.text]
-            paragraph_text = "".join(texts).strip()
-            if paragraph_text:
-                paragraphs.append(paragraph_text)
-
-        merged = "\n".join(paragraphs).strip()
-        if not merged:
-            return []
-        return [{"page": 1, "text": merged}]
+    lines = _extract_docx_text_lines(content)
+    merged = "\n".join(lines).strip()
+    if not merged:
+        return []
+    return [{"page": 1, "text": merged}]

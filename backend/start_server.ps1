@@ -2,19 +2,25 @@
 Write-Host "Starting Backend Server..." -ForegroundColor Green
 Write-Host ""
 
+# Navigate to backend directory
+$backendPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $backendPath
+
+$venvPython = Join-Path $backendPath "venv\Scripts\python.exe"
 $pythonCmd = $null
-if (Get-Command python -ErrorAction SilentlyContinue) {
+if (Test-Path $venvPython) {
+    $pythonCmd = $venvPython
+    Write-Host "Using backend virtual environment Python" -ForegroundColor Green
+} elseif (Get-Command python -ErrorAction SilentlyContinue) {
     $pythonCmd = "python"
+    Write-Host "Using system Python" -ForegroundColor Yellow
 } elseif (Get-Command py -ErrorAction SilentlyContinue) {
     $pythonCmd = "py"
+    Write-Host "Using Python launcher" -ForegroundColor Yellow
 } else {
     Write-Host "ERROR: Python not found!" -ForegroundColor Red
     exit 1
 }
-
-# Navigate to backend directory
-$backendPath = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $backendPath
 
 # Check if .env exists
 if (-not (Test-Path ".env")) {

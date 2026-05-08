@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from types import SimpleNamespace
 
 from gpa_calculator import calculate_gpa, GPACourse
 from routers import (
@@ -30,7 +31,7 @@ from core.database import SessionLocal
 from core.config import get_settings
 from routers.academic_core import ensure_academic_core_schema, seed_default_assessment_templates
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 settings = get_settings()
 DEBUG_MODE = True
 
@@ -552,6 +553,31 @@ _REGULATION_INTENT_TERMS = (
     "college",
     "ط¸ئ’ط¸â€‍ط¸ظ¹ط·آ©",
     "ط·آ§ط¸â€‍ط¸ئ’ط¸â€‍ط¸ظ¹ط¸â€،",
+    "تحويل",
+    "التحويل",
+    "حذف",
+    "اضافة",
+    "إضافة",
+    "انسحاب",
+    "انذار",
+    "إنذار",
+    "تخرج",
+    "graduation",
+    "transfer",
+    "withdraw",
+    "warning",
+    "عبء",
+    "العبء",
+    "العبء الأكاديمي",
+    "العبء الاكاديمي",
+    "الحد الأقصى",
+    "الحد الاقصى",
+    "الحد الأدنى",
+    "الحد الادنى",
+    "معدل تراكمي",
+    "المعدل التراكمي",
+    "ساعات معتمدة",
+    "ساعات معتمده",
 )
 
 _AR_LEVEL_WORDS_TO_DIGIT = {
@@ -940,6 +966,33 @@ def _is_student_data_query(message: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _answer_bnu_facts_query(message: str) -> str:
+    text = _normalize_search_text(str(message or ""))
+    if not text:
+        return ""
+
+    asks_about_bnu = any(token in text for token in ("بنها", "bnu", "benha", "الاهليه", "الأهلية"))
+    asks_official_site = (
+        ("موقع" in text and "رسمي" in text)
+        or "الموقع الرسمي" in text
+        or "website" in text
+        or "official site" in text
+    )
+    asks_location = any(token in text for token in ("اين", "فين", "مكان", "عنوان", "تقع", "location", "address", "where"))
+    asks_type = any(token in text for token in ("نوع", "اهليه ام خاصه", "أهلية أم خاصة", "خاصه", "خاصة", "غير هادفه للربح", "غير هادفة للربح"))
+
+    if asks_about_bnu and asks_official_site:
+        return "الموقع الرسمي لجامعة بنها الأهلية هو: https://bnu.edu.eg/"
+    if asks_about_bnu and asks_location:
+        return (
+            "تقع جامعة بنها الأهلية في مدينة العبور بمحافظة القليوبية، "
+            "وعنوانها: مبنى الخدمات الطلابية B - جامعة بنها الأهلية - محور العبور الرئيسي - الحي الترفيهي."
+        )
+    if asks_about_bnu and asks_type:
+        return "جامعة بنها الأهلية هي جامعة أهلية غير هادفة للربح."
+    return ""
+
+
 def _answer_student_data_query(current_user: User, message: str) -> str:
     text = _normalize_arabic_query(message or "")
     if "الكليه" in text or "college" in text:
@@ -1195,6 +1248,12 @@ ACADEMIC_TERMS = (
     "تخرج", "التخرج", "للتخرج", "graduation", "graduate",
     "برنامج", "برامج", "خطة", "الخطة", "متطلبات", "متطلبات التخرج",
     "دليل الطالب", "دليل", "دراسة", "مدة الدراسة",
+    "تحويل", "التحويل", "transfer", "عبء", "العبء", "العبء الأكاديمي",
+    "حد أدنى", "الحد الأدنى", "حد أقصى", "الحد الأقصى",
+    "معدل", "المعدل", "معدل تراكمي", "المعدل التراكمي",
+    "حضور", "غياب", "انسحاب", "الحذف", "الإضافة", "الاضافة",
+    "إنذار", "انذار", "تقدير", "درجات", "تدريب ميداني", "مشروع التخرج",
+    "زائر", "ضيف", "تبادل",
 )
 SYSTEM_MARKERS = (
     "you are", "task overview", "output format", "strict rules", "system instructions",
@@ -1219,6 +1278,8 @@ def classify_question(message: str) -> str:
         return "SYSTEM"
 
     if any(_normalize_search_text(term) in normalized for term in ACADEMIC_TERMS):
+        return "ACADEMIC"
+    if _is_strict_academic_query(text):
         return "ACADEMIC"
     return "GENERAL"
 
@@ -1323,6 +1384,22 @@ def _is_strict_academic_query(message: str) -> bool:
         return False
     strict_markers = (
         "لائحه",
+        "تحويل",
+        "خارج الجامعه",
+        "العبء",
+        "عبء اكاديمي",
+        "الحد الاقصى",
+        "الحد الادنى",
+        "الحذف",
+        "الاضافه",
+        "الإضافة",
+        "انسحاب",
+        "انذار",
+        "التحويل",
+        "معدل",
+        "معدل تراكمي",
+        "الحضور",
+        "الغياب",
         "جدول",
         "ماده",
         "مواد",
@@ -1339,6 +1416,9 @@ def _is_strict_academic_query(message: str) -> bool:
         "course",
         "courses",
         "registration",
+        "transfer",
+        "withdraw",
+        "warning",
         "tuition",
         "semester",
         "faculty",
@@ -1906,6 +1986,41 @@ def _extractive_academic_answer(message: str, scored_chunks: List[dict]) -> str:
             "136",
         )
     )
+    wants_max_load = any(
+        marker in raw_message
+        for marker in (
+            "الحد الأقصى للعبء الأكاديمي",
+            "الحد الاقصى للعبء الاكاديمي",
+            "حد أقصى",
+            "حد اقصى",
+            "العبء الأكاديمي",
+            "العبء الاكاديمي",
+            "max academic load",
+        )
+    ) or any(
+        marker in normalized_message
+        for marker in (
+            "الحد الاقصى للعبء الاكاديمي",
+            "حد اقصى",
+            "العبء الاكاديمي",
+        )
+    )
+    wants_min_load = any(
+        marker in raw_message
+        for marker in (
+            "الحد الأدنى للعبء الأكاديمي",
+            "الحد الادنى للعبء الاكاديمي",
+            "حد أدنى",
+            "حد ادنى",
+            "min academic load",
+        )
+    ) or any(
+        marker in normalized_message
+        for marker in (
+            "الحد الادنى للعبء الاكاديمي",
+            "حد ادنى",
+        )
+    )
 
     prioritized_markers = (
         "مدة الدراسة",
@@ -1915,6 +2030,9 @@ def _extractive_academic_answer(message: str, scored_chunks: List[dict]) -> str:
         "مشروع التخرج",
         "تدريب ميداني",
         "الفصل الصيفي",
+        "الحد الأقصى للعبء الأكاديمي",
+        "الحد الأدنى من العبء الأكاديمي",
+        "العبء الأكاديمي",
     )
 
     # Try direct numeric patterns first across the whole retrieved text.
@@ -1940,6 +2058,22 @@ def _extractive_academic_answer(message: str, scored_chunks: List[dict]) -> str:
             )
             if direct_hours:
                 return re.sub(r"\s+", " ", direct_hours.group(0)).strip()[:320]
+        if wants_max_load:
+            direct_max_load = re.search(
+                r"(?:الحد\s+الأقصى\s+للعبء\s+الأكاديمي[^\.:\n]{0,180}?\d+\s*ساع(?:ه|ة)\s*معتم(?:ده|دة))",
+                combined_text,
+                re.IGNORECASE,
+            )
+            if direct_max_load:
+                return re.sub(r"\s+", " ", direct_max_load.group(0)).strip()[:360]
+        if wants_min_load:
+            direct_min_load = re.search(
+                r"(?:الحد\s+الأدنى(?:\s+من)?\s+العبء\s+الأكاديمي[^\.:\n]{0,180}?\d+\s*ساع(?:ه|ة)\s*معتم(?:ده|دة))",
+                combined_text,
+                re.IGNORECASE,
+            )
+            if direct_min_load:
+                return re.sub(r"\s+", " ", direct_min_load.group(0)).strip()[:360]
 
     best_line = ""
     best_score = -1
@@ -1975,6 +2109,19 @@ def _extractive_academic_answer(message: str, scored_chunks: List[dict]) -> str:
                 or "136 ساعه معتمده" in normalized_candidate
             ):
                 return candidate[:320].strip()
+            if wants_max_load and (
+                "الحد الأقصى للعبء الأكاديمي" in raw_candidate
+                or "الحد الاقصى للعبء الاكاديمي" in normalized_candidate
+                or ("العبء الاكاديمي" in normalized_candidate and "21" in normalized_candidate)
+                or ("العبء الاكاديمي" in normalized_candidate and "18" in normalized_candidate)
+            ):
+                return candidate[:360].strip()
+            if wants_min_load and (
+                "الحد الأدنى من العبء الأكاديمي" in raw_candidate
+                or "الحد الادنى من العبء الاكاديمي" in normalized_candidate
+                or ("العبء الاكاديمي" in normalized_candidate and "9" in normalized_candidate)
+            ):
+                return candidate[:360].strip()
 
             overlap = sum(1 for tok in query_tokens if tok in normalized_candidate)
             marker_bonus = sum(2 for marker in prioritized_markers if _normalize_search_text(marker) in normalized_candidate)
@@ -1985,6 +2132,220 @@ def _extractive_academic_answer(message: str, scored_chunks: List[dict]) -> str:
                 best_line = candidate
 
     return best_line[:320].strip()
+
+
+def _regulation_query_markers(message: str) -> List[str]:
+    normalized = _normalize_search_text(message or "")
+    markers: List[str] = []
+    if any(token in normalized for token in ("تخرج", "التخرج", "graduation", "graduate")):
+        markers.extend(["التخرج", "متطلبات التخرج", "مشروع التخرج", "تدريب ميداني"])
+    if any(token in normalized for token in ("تحويل", "التحويل", "transfer")):
+        markers.extend(["التحويل", "الانتقال", "من برنامج إلى آخر", "من تخصص إلى آخر"])
+    if any(token in normalized for token in ("حذف", "اضافه", "إضافة", "الاضافه", "الإضافة", "withdraw", "add")):
+        markers.extend(["الحذف", "الإضافة", "الاضافة", "الانسحاب", "تسجيل المقررات"])
+    if any(token in normalized for token in ("انذار", "إنذار", "warning")):
+        markers.extend(["الإنذار", "الانذار", "الفصل", "المعدل التراكمي"])
+    if any(token in normalized for token in ("عبء", "العبء", "load", "ساعات معتمده", "ساعات معتمدة")):
+        markers.extend(["العبء الأكاديمي", "الحد الأقصى للعبء الأكاديمي", "الحد الأدنى من العبء الأكاديمي", "21ساعة معتمدة", "9 ساعات معتمدة"])
+    return markers
+
+
+def _extract_regulation_section_answer(text: str, message: str) -> str:
+    clean_text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean_text:
+        return ""
+
+    normalized_message = _normalize_search_text(message or "")
+    anchors: List[str] = []
+    if any(token in normalized_message for token in ("تخرج", "التخرج", "graduation", "graduate")):
+        anchors.extend(["متطلبات التخرج", "التخرج", "يتخرج الطالب", "مشروع التخرج"])
+    if any(token in normalized_message for token in ("تحويل", "التحويل", "transfer")):
+        anchors.extend(["التحويل", "تحويل الطالب", "الانتقال", "من برنامج إلى آخر", "من تخصص إلى آخر"])
+    if any(token in normalized_message for token in ("حذف", "اضافه", "إضافة", "الاضافه", "الإضافة", "withdraw", "add")):
+        anchors.extend(["الانسحاب", "الحذف", "الإضافة", "الاضافة", "تسجيل المقررات"])
+    if any(token in normalized_message for token in ("انذار", "إنذار", "warning")):
+        anchors.extend(["الإنذار", "الانذار", "المراقبة", "الفصل"])
+    if any(token in normalized_message for token in ("عبء", "العبء", "load", "ساعات معتمده", "ساعات معتمدة")):
+        anchors.extend(["الحد الأقصى للعبء الأكاديمي", "الحد الأدنى من العبء الأكاديمي", "العبء الأكاديمي", "يمكن لطلاب السنة النهائية"])
+
+    if not anchors:
+        return ""
+
+    for anchor in anchors:
+        match = re.search(re.escape(anchor), clean_text, re.IGNORECASE)
+        if not match:
+            continue
+
+        start = match.start()
+        end = min(len(clean_text), start + 720)
+        snippet = clean_text[start:end].strip(" |-\n\r\t")
+        if len(snippet) < 24:
+            continue
+
+        boundary_match = re.search(r"(?:\s[■●•]\s|\sثانيا[:：]|\sثالثا[:：]|\sرابعا[:：])", snippet[80:])
+        if boundary_match:
+            snippet = snippet[: 80 + boundary_match.start()].strip(" |-\n\r\t")
+
+        if len(snippet) >= 24:
+            return snippet[:520].strip()
+
+    return ""
+
+
+def _split_storage_extracted_text(text: str, chunk_size: int = 850, chunk_overlap: int = 120) -> List[str]:
+    normalized_text = str(text or "").replace("\r", "\n")
+    raw_parts = [
+        re.sub(r"\s+", " ", part).strip()
+        for part in re.split(r"\n{2,}|---\s*صفحة\s*\d+\s*---|(?<=[\.\:\;\،])\s+(?=\S)", normalized_text)
+        if re.sub(r"\s+", " ", part).strip()
+    ]
+    if not raw_parts:
+        return []
+
+    chunks: List[str] = []
+    current = ""
+    for part in raw_parts:
+        candidate = f"{current} {part}".strip() if current else part
+        if len(candidate) <= chunk_size:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        if len(part) <= chunk_size:
+            current = part
+            continue
+        start = 0
+        while start < len(part):
+            end = min(len(part), start + chunk_size)
+            slice_text = part[start:end].strip()
+            if slice_text:
+                chunks.append(slice_text)
+            if end >= len(part):
+                break
+            start = max(0, end - chunk_overlap)
+        current = ""
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _retrieve_regulation_chunks_from_storage(
+    db: Session,
+    message: str,
+    retrieval_filter: Optional[dict],
+    limit: int = 10,
+) -> List[dict]:
+    normalized_message = _normalize_search_text(message or "")
+    query_tokens = [tok for tok in normalized_message.split() if len(tok) >= 3]
+    marker_terms = [_normalize_search_text(item) for item in _regulation_query_markers(message) if _normalize_search_text(item)]
+    if not query_tokens and not marker_terms:
+        return []
+
+    rows = (
+        db.query(StorageItem)
+        .filter(
+            (StorageItem.content_type == "regulation")
+            | (StorageItem.file_name.ilike("%لائ%"))
+            | (StorageItem.file_name.ilike("%regulation%"))
+        )
+        .order_by(StorageItem.priority.desc(), StorageItem.updated_at.desc())
+        .all()
+    )
+
+    scored_chunks: List[dict] = []
+    expected_level = _scope_norm(_canonical_level_value((retrieval_filter or {}).get("level")))
+    expected_college = _scope_norm((retrieval_filter or {}).get("college_key") or (retrieval_filter or {}).get("college"))
+
+    for item in rows:
+        item_text = str(getattr(item, "extracted_text", "") or "").strip()
+        if not item_text:
+            continue
+
+        item_level = _scope_norm(_canonical_level_value(getattr(item, "level", "") or ""))
+        item_college = _scope_norm(getattr(item, "college", "") or "")
+        if expected_level and item_level and not (_is_all_year_value(expected_level) or _is_all_year_value(item_level) or item_level == expected_level):
+            continue
+        if expected_college and item_college and expected_college != item_college:
+            continue
+
+        file_url = f"/api/storage/files/{str(getattr(item, 'stored_name', '') or '').strip()}" if str(getattr(item, "stored_name", "") or "").strip() else ""
+        text_chunks = _split_storage_extracted_text(item_text)
+        for chunk_index, chunk_text in enumerate(text_chunks, start=1):
+            normalized_chunk = _normalize_search_text(chunk_text)
+            overlap = sum(1 for tok in query_tokens if tok in normalized_chunk)
+            marker_hits = sum(1 for marker in marker_terms if marker in normalized_chunk)
+            policy_bonus = sum(1 for marker in ("يجوز", "يشترط", "يجب", "متطلبات", "شروط", "شرط") if _normalize_search_text(marker) in normalized_chunk)
+            if overlap <= 0 and marker_hits <= 0:
+                continue
+
+            score = min(0.95, (0.12 * overlap) + (0.18 * marker_hits) + (0.04 * policy_bonus))
+            metadata = {
+                "document_id": f"storage:{item.id}",
+                "source": "storage_pdf",
+                "source_type": str(getattr(item, "source_type", "") or "word"),
+                "storage_item_id": int(getattr(item, "id", 0) or 0),
+                "storage_file_name": str(getattr(item, "file_name", "") or "").strip(),
+                "stored_name": str(getattr(item, "stored_name", "") or "").strip(),
+                "file_url": file_url,
+                "content_type": str(getattr(item, "content_type", "") or "").strip().lower() or "regulation",
+                "priority": str(getattr(item, "priority", 0) or 0),
+                "page": 1,
+                "chunk": chunk_index,
+                "access_scope": "public" if _is_all_year_value(item_level) or not item_level else "level",
+                "level": item_level or "all",
+                "college": str(getattr(item, "college", "") or "").strip() or None,
+                "category": str(getattr(item, "category", "") or "").strip().lower() or None,
+            }
+            doc = SimpleNamespace(page_content=chunk_text, metadata={k: v for k, v in metadata.items() if v is not None})
+            scored_chunks.append(
+                {
+                    "doc": doc,
+                    "score": score,
+                    "base_score": score,
+                    "raw_score": score,
+                    "score_kind": "storage_text",
+                    "metadata": dict(doc.metadata),
+                    "applied_filter": dict(retrieval_filter or {}),
+                }
+            )
+
+    scored_chunks.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return scored_chunks[: max(1, int(limit or 10))]
+
+
+def _extract_regulation_answer_from_storage(db: Session, message: str, retrieval_filter: Optional[dict]) -> str:
+    rows = (
+        db.query(StorageItem)
+        .filter(
+            (StorageItem.content_type == "regulation")
+            | (StorageItem.file_name.ilike("%لائ%"))
+            | (StorageItem.file_name.ilike("%regulation%"))
+        )
+        .order_by(StorageItem.priority.desc(), StorageItem.updated_at.desc())
+        .all()
+    )
+    for item in rows:
+        section_answer = _extract_regulation_section_answer(
+            text=str(getattr(item, "extracted_text", "") or ""),
+            message=message,
+        )
+        if section_answer:
+            return section_answer
+
+    storage_chunks = _retrieve_regulation_chunks_from_storage(
+        db=db,
+        message=message,
+        retrieval_filter=retrieval_filter,
+        limit=12,
+    )
+    if not storage_chunks:
+        return ""
+    answer = _extractive_academic_answer(message, storage_chunks)
+    if answer:
+        return answer
+    top_doc = storage_chunks[0].get("doc")
+    top_text = re.sub(r"\s+", " ", str(getattr(top_doc, "page_content", "") or "")).strip()
+    return top_text[:420].strip()
 
 
 def _load_all_chunks_for_document(document_id: str) -> List[dict]:
@@ -2149,6 +2510,15 @@ async def legacy_chat_endpoint(
         "decision_reason": "",
     }
 
+    if response_type not in {"INDEXING", "SYSTEM"}:
+        bnu_facts_answer = _answer_bnu_facts_query(raw_message)
+        if bnu_facts_answer:
+            response_type = "GENERAL"
+            response_text = bnu_facts_answer
+            debug_info["grounded"] = True
+            debug_info["fallback_triggered"] = True
+            debug_info["decision_reason"] = "Answered from trusted built-in BNU facts before RAG/LLM."
+
     display_intent = response_type != "INDEXING" and _detect_display_intent(raw_message)
     if response_type not in {"INDEXING", "SYSTEM"} and display_intent:
         display_matches = _search_display_content(db=db, current_user=current_user, query=raw_message, limit=3)
@@ -2201,6 +2571,7 @@ async def legacy_chat_endpoint(
     elif response_type == "ACADEMIC":
         explicit_file_request = _is_explicit_file_request(raw_message)
         media_preview_mode = False
+        is_regulation_query = _is_regulation_intent(raw_message)
         requested_college = str(request.college or "").strip()
         requested_year = str(request.year or "").strip()
         current_user_level = str(getattr(current_user, "level", "") or "")
@@ -2215,12 +2586,20 @@ async def legacy_chat_endpoint(
             "category": (requested_subject or requested_category or "").strip().lower() or None,
             "sources": ["storage_pdf", "student_guide_pdf", "knowledge_text"],
         }
+        fallback_retrieval_filter = dict(retrieval_filter)
+        if is_regulation_query:
+            retrieval_filter["preferred_content_type"] = "regulation"
+            retrieval_filter["content_type"] = "regulation"
         debug_info["applied_filters"] = _filters_to_debug_list(retrieval_filter)
         query_text = _expand_numeric_student_query(raw_message, current_user)
         thresholds = _resolve_rag_thresholds()
         min_document_score = float(thresholds["document"])
         min_chunk_score = float(thresholds["chunk"])
         min_asset_only_score = float(thresholds["asset_only"])
+        if is_regulation_query:
+            min_document_score = min(min_document_score, 0.22)
+            min_chunk_score = min(min_chunk_score, 0.12)
+            min_asset_only_score = min(min_asset_only_score, 0.18)
         max_answer_chunks = max(1, int(os.getenv("RAG_MAX_ANSWER_CHUNKS", "5")))
         max_context_tokens = max(300, int(os.getenv("RAG_MAX_CONTEXT_TOKENS", "1400")))
         debug_info["threshold_used"] = float(min_document_score)
@@ -2255,15 +2634,47 @@ async def legacy_chat_endpoint(
             except Exception:
                 scored_chunks_raw = []
 
+            if is_regulation_query and not scored_chunks_raw:
+                try:
+                    scored_chunks_raw = router_rag_chatbot.retrieve_scored_documents(
+                        message=query_text,
+                        retrieval_filter=fallback_retrieval_filter,
+                        k=max(12, max_answer_chunks * 3),
+                    )
+                    if scored_chunks_raw:
+                        debug_info["fallback_triggered"] = True
+                        debug_info["decision_reason"] = "Primary regulation-only retrieval was empty; expanded to general academic sources."
+                except Exception:
+                    scored_chunks_raw = []
+
             scored_chunks = [
                 item
                 for item in (scored_chunks_raw or [])
-                if _metadata_matches_retrieval_filter(item.get("metadata") or {}, retrieval_filter)
+                if _metadata_matches_retrieval_filter(
+                    item.get("metadata") or {},
+                    fallback_retrieval_filter if (is_regulation_query and debug_info["fallback_triggered"]) else retrieval_filter,
+                )
             ]
             if not scored_chunks and _is_index_preview_request(raw_message):
                 # Keep preview requests useful, but still retrieval-only.
                 scored_chunks = scored_chunks_raw or []
                 debug_info["fallback_triggered"] = True
+
+            if is_regulation_query and (not scored_chunks or max(float(item.get("score") or 0.0) for item in scored_chunks) < min_document_score):
+                storage_text_chunks = _retrieve_regulation_chunks_from_storage(
+                    db=db,
+                    message=query_text,
+                    retrieval_filter=fallback_retrieval_filter,
+                    limit=max(8, max_answer_chunks * 2),
+                )
+                if storage_text_chunks:
+                    scored_chunks = sorted(
+                        [*(scored_chunks or []), *storage_text_chunks],
+                        key=lambda item: float(item.get("score") or 0.0),
+                        reverse=True,
+                    )
+                    debug_info["fallback_triggered"] = True
+                    debug_info["decision_reason"] = "Used regulation text fallback from storage_items.extracted_text."
 
             ranked_docs = _rank_document_groups(scored_chunks)
             best_doc = ranked_docs[0] if ranked_docs else None
@@ -2272,7 +2683,7 @@ async def legacy_chat_endpoint(
             debug_info["retrieval_score"] = best_retrieval_score
 
             if not best_doc:
-                if not explicit_file_request and not _is_strict_academic_query(raw_message):
+                if not explicit_file_request and not _is_strict_academic_query(raw_message) and not is_regulation_query:
                     general_answer = _invoke_general_llm_answer(raw_message, conv.id)
                     response_type = "GENERAL"
                     response_text = f"{general_answer}\n\n⚠️ هذه إجابة عامة وليست من مستندات الجامعة"
@@ -2323,14 +2734,27 @@ async def legacy_chat_endpoint(
                             debug_info["fallback_triggered"] = True
                             debug_info["decision_reason"] = "Used extractive fallback from grounded chunks after answer composition was not confident."
                         else:
-                            response_text = "المعلومة غير موجودة في المستندات المتاحة"
-                            response_type = "MISSING_DATA"
-                            assets = []
-                            actions = ["رفع مستند"]
-                            source_name = None
-                            sources = []
-                            debug_info["grounded"] = False
-                            debug_info["decision_reason"] = "Grounded chunks existed but answer composition was not confident."
+                            regulation_storage_answer = _extract_regulation_answer_from_storage(
+                                db=db,
+                                message=raw_message,
+                                retrieval_filter=fallback_retrieval_filter,
+                            ) if is_regulation_query else ""
+                            if regulation_storage_answer:
+                                response_type = "ACADEMIC"
+                                response_text = regulation_storage_answer
+                                actions = ["عرض الملف"] if _has_openable_asset(assets, related_content) else ["مستندات مرتبطة"]
+                                debug_info["grounded"] = True
+                                debug_info["fallback_triggered"] = True
+                                debug_info["decision_reason"] = "Recovered answer from full regulation extracted_text after chunk answer was not confident."
+                            else:
+                                response_text = "المعلومة غير موجودة في المستندات المتاحة"
+                                response_type = "MISSING_DATA"
+                                assets = []
+                                actions = ["رفع مستند"]
+                                source_name = None
+                                sources = []
+                                debug_info["grounded"] = False
+                                debug_info["decision_reason"] = "Grounded chunks existed but answer composition was not confident."
                     else:
                         response_type = "ACADEMIC"
                         actions = ["عرض الملف"] if _has_openable_asset(assets, related_content) else ["مستندات مرتبطة"]
@@ -2342,6 +2766,18 @@ async def legacy_chat_endpoint(
                     if has_pdf_asset:
                         doc_overlap = _has_query_doc_overlap(raw_message, source_name, assets)
                         allow_asset_only = explicit_file_request or doc_overlap
+                    if is_regulation_query and best_doc.get("chunks"):
+                        extractive_answer = _extractive_academic_answer(raw_message, best_doc.get("chunks") or []) or _extractive_academic_answer(raw_message, full_document_chunks)
+                        if extractive_answer:
+                            response_type = "ACADEMIC"
+                            response_text = extractive_answer
+                            actions = ["عرض الملف"] if _has_openable_asset(assets, related_content) else ["مستندات مرتبطة"]
+                            debug_info["grounded"] = True
+                            debug_info["fallback_triggered"] = True
+                            debug_info["decision_reason"] = "Regulation query accepted extractive answer from matched document despite low aggregate score."
+                            allow_asset_only = False
+                        else:
+                            allow_asset_only = allow_asset_only
                     if allow_asset_only and best_retrieval_score >= min_asset_only_score:
                         response_type = "ACADEMIC"
                         response_text = "تم العثور على ملف متعلق بسؤالك، يمكنك الاطلاع عليه:"

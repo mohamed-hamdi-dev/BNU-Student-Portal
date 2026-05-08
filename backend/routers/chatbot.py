@@ -207,20 +207,29 @@ async def chat_with_ai(
         should_use_retrieval = bool(not is_light_chat_query and len(str(req.message or "").strip()) >= 2)
         should_require_grounded_retrieval = bool(is_regulation_query and not is_light_chat_query)
         retrieval_filter = None
+        fallback_retrieval_filter = None
         if should_use_retrieval:
-            retrieval_filter = {
+            base_retrieval_filter = {
                 "student_id": str(current_user.id),
                 "level": _normalize_scope_text(getattr(current_user, "level", "") or ""),
                 "college_key": _canonical_college_key(getattr(current_user, "college", "") or ""),
                 "sources": ["student_guide_pdf", "storage_pdf"],
             }
+            if is_regulation_query:
+                retrieval_filter = {**base_retrieval_filter, "preferred_content_type": "regulation", "content_type": "regulation"}
+                fallback_retrieval_filter = base_retrieval_filter
+            else:
+                retrieval_filter = base_retrieval_filter
         response_data = rag_chatbot.chat(
             req.message,
             req.session_id,
             current_user.id,
             retrieval_filter=retrieval_filter,
+            fallback_retrieval_filter=fallback_retrieval_filter,
             require_retrieval=should_require_grounded_retrieval,
             retrieve_context=should_use_retrieval,
+            min_retrieval_score=0.22 if is_regulation_query else 0.0,
+            allow_general_fallback_override=bool(not is_light_chat_query),
         )
         ai_text = response_data["answer"]
         sources = response_data.get("sources", [])

@@ -187,6 +187,38 @@ def _infer_access_scope(level_value: str | None) -> str:
     return "level"
 
 
+def _looks_like_regulation_document(*values: str | None) -> bool:
+    combined = " ".join(_normalize_scope_text(value or "") for value in values if str(value or "").strip())
+    if not combined:
+        return False
+    regulation_terms = (
+        "لايحه",
+        "لائحه",
+        "لائحة",
+        "regulation",
+        "bylaw",
+        "student regulations",
+        "الساعات المعتمده",
+        "الساعات المعتمدة",
+    )
+    return any(term in combined for term in regulation_terms)
+
+
+def _normalize_document_priority(
+    file_name: str,
+    category: str | None,
+    content_type: str | None,
+    priority: int | None,
+    keywords: str | None,
+) -> tuple[str | None, int]:
+    normalized_content_type = str(content_type or "").strip().lower() or None
+    normalized_priority = int(priority or 0)
+    if _looks_like_regulation_document(file_name, category, content_type, keywords):
+        normalized_content_type = "regulation"
+        normalized_priority = max(normalized_priority, 100)
+    return normalized_content_type, normalized_priority
+
+
 def _extract_storage_file_names(value: str | None) -> set[str]:
     return {str(match).strip() for match in _STORAGE_FILE_ROUTE_RE.findall(str(value or "")) if str(match).strip()}
 
@@ -391,7 +423,13 @@ async def upload_and_index_storage_pdf(
     normalized_academic_year = str(academic_year or "").strip() or None
     normalized_semester = str(semester or "").strip() or None
     normalized_keywords = str(keywords or "").strip() or None
-    normalized_content_type = str(content_type or "").strip() or None
+    normalized_content_type, normalized_priority = _normalize_document_priority(
+        file_name=str(file_name or original_name).strip() or original_name,
+        category=str(category or "").strip() or None,
+        content_type=str(content_type or "").strip() or None,
+        priority=priority,
+        keywords=normalized_keywords,
+    )
 
     item = StorageItem(
         file_name=str(file_name or original_name).strip() or original_name,
@@ -410,7 +448,7 @@ async def upload_and_index_storage_pdf(
         academic_year=normalized_academic_year,
         semester=normalized_semester,
         keywords=normalized_keywords,
-        priority=priority,
+        priority=normalized_priority,
         content_type=normalized_content_type,
     )
 
@@ -475,7 +513,7 @@ async def upload_and_index_storage_pdf(
             "academic_year": normalized_academic_year,
             "semester": normalized_semester,
             "keywords": normalized_keywords,
-            "priority": str(priority),
+            "priority": str(normalized_priority),
             "content_type": normalized_content_type,
         }
         # Remove None values from metadata (ChromaDB doesn't accept None)
@@ -576,6 +614,13 @@ async def index_existing_storage_pdf(
     access_scope = _infer_access_scope(normalized_level)
     college_text = str(getattr(item, "college", "") or "").strip() or _extract_college(normalized_level or "")
     level_scope_value = _extract_level_scope_value(normalized_level or "")
+    normalized_content_type, normalized_priority = _normalize_document_priority(
+        file_name=str(item.file_name or stored_name).strip() or stored_name,
+        category=str(item.category or "").strip() or None,
+        content_type=str(getattr(item, "content_type", "") or "").strip() or None,
+        priority=int(getattr(item, "priority", 0) or 0),
+        keywords=str(getattr(item, "keywords", "") or "").strip() or None,
+    )
     base_metadata = {
         "document_id": document_id,
         "source": "storage_pdf",
@@ -595,8 +640,8 @@ async def index_existing_storage_pdf(
         "academic_year": str(getattr(item, "academic_year", "") or "").strip() or None,
         "semester": str(getattr(item, "semester", "") or "").strip() or None,
         "keywords": str(getattr(item, "keywords", "") or "").strip() or None,
-        "priority": str(getattr(item, "priority", 0) or 0),
-        "content_type": str(getattr(item, "content_type", "") or "").strip() or None,
+        "priority": str(normalized_priority),
+        "content_type": normalized_content_type,
     }
     # Remove None values
     base_metadata = {k: v for k, v in base_metadata.items() if v is not None}
@@ -617,6 +662,8 @@ async def index_existing_storage_pdf(
     item.indexing_error = None
     item.extracted_text = prepared.extracted_text
     item.chunks_count = len(prepared.documents)
+    item.priority = normalized_priority
+    item.content_type = normalized_content_type
     item.updated_at = datetime.now(timezone.utc)
     db.add(item)
     db.commit()

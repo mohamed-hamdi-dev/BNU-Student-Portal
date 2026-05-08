@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(_ENV_PATH)
+load_dotenv(_ENV_PATH, override=True)
 
 
 def _env_str(name: str, default: str = "") -> str:
