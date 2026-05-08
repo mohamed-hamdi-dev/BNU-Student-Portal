@@ -108,7 +108,9 @@ async def startup_event():
     # ChromaDB is local/ephemeral on Railway, so after each deploy
     # the vector store is empty. This reindexes all stored documents
     # and knowledge chunks automatically.
-    # Run as background task so FastAPI can start serving immediately.
+    # We run this in the background so it doesn't block the server startup
+    # and trigger Railway healthcheck timeouts.
+    import asyncio
     asyncio.create_task(_auto_reindex_rag_on_startup())
 
 
