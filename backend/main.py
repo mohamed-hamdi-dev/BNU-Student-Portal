@@ -3308,7 +3308,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "rag_chatbot_available": rag_chatbot is not None
+        "rag_chatbot_available": router_rag_chatbot is not None
     }
 
 
