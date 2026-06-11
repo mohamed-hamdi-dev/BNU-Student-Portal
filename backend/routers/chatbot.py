@@ -17,22 +17,15 @@ from core.config import get_settings
 from core.deps import get_current_user, get_db, require_role
 from models.chatbot import ChatbotMessage, ChatbotSession
 from models.user import User
-from rag_chatbot import RAGChatbot
+
 from services.document_ingestion import ensure_upload_content, index_prepared_document, prepare_indexable_document
 
 router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 STORAGE_FILES_DIR = Path(__file__).resolve().parent.parent / "storage_files"
 STORAGE_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Initialize RAG globally for this router
-settings = get_settings()
+# We are offloading AI to external API, no need to initialize heavy local RAG models.
 rag_chatbot = None
-if settings.GROQ_API_KEY:
-    try:
-        rag_chatbot = RAGChatbot(persist_directory="./chroma_db")
-        print("Global RAG Chatbot initialized in router.")
-    except Exception as exc:
-        print(f"Failed to initialize RAG Chatbot: {exc}")
 
 
 class ChatGenerateRequest(BaseModel):
@@ -201,14 +194,15 @@ async def chat_with_ai(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             payload = {
-                "question": req.message,
-                "enhance_query": False
+                "ask": req.message,
+                "enhance_query": False,
+                "history": []
             }
-            response = await client.post("https://worry-undergo-coma.ngrok-free.dev/", json=payload)
+            response = await client.post("https://worry-undergo-coma.ngrok-free.dev/ask", json=payload)
             response.raise_for_status()
             data = response.json()
             
-            ai_text = data.get("answer", "عذراً، لم أتمكن من الحصول على إجابة.")
+            ai_text = data if isinstance(data, str) else data.get("answer", "عذراً، لم أتمكن من الحصول على إجابة.")
             sources = data.get("top_3_pages", [])
             sources = [f"Page {s}" for s in sources]
     except Exception as exc:
