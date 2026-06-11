@@ -20,7 +20,7 @@ from routers import (
     dashboard_router, feedback_router, content_router, storage_router, 
     settings_router, campus_router, ai_router, courses_router, quizzes_router, academic_router, academic_core_router, payment_router, maintenance_router, knowledge_router, attendance_router
 )
-from routers.ai_router import rag_chatbot as router_rag_chatbot
+from routers.chatbot import get_rag_chatbot
 from core.deps import get_current_user, get_db
 from models.user import User
 from models.content import ContentPost
@@ -88,9 +88,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize RAG chatbot
-rag_chatbot = router_rag_chatbot
-
 @app.on_event("startup")
 async def startup_event():
     # Initialize ORM-managed tables for the configured database engine.
@@ -114,7 +111,7 @@ async def startup_event():
 
 async def _auto_reindex_rag_on_startup():
     """Re-index all storage documents and knowledge chunks into RAG if the vector store is empty."""
-    from routers.chatbot import rag_chatbot as startup_rag_chatbot
+    startup_rag_chatbot = get_rag_chatbot()
 
     if startup_rag_chatbot is None:
         print("[RAG Startup] RAG chatbot not initialized, skipping auto-reindex.")

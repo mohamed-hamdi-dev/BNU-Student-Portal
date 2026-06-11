@@ -23,15 +23,30 @@ router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 STORAGE_FILES_DIR = Path(__file__).resolve().parent.parent / "storage_files"
 STORAGE_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Initialize RAG globally for this router
-settings = get_settings()
+# Lazy-initialize RAG so the heavy HuggingFace model download does not
+# block application startup and cause healthcheck timeouts.
+_rag_chatbot_instance = None
+_rag_chatbot_initialized = False
+
+
+def get_rag_chatbot():
+    """Return the RAGChatbot singleton, initializing on first call."""
+    global _rag_chatbot_instance, _rag_chatbot_initialized
+    if _rag_chatbot_initialized:
+        return _rag_chatbot_instance
+    _rag_chatbot_initialized = True
+    settings = get_settings()
+    if settings.GROQ_API_KEY:
+        try:
+            _rag_chatbot_instance = RAGChatbot(persist_directory="./chroma_db")
+            print("Global RAG Chatbot initialized in router.")
+        except Exception as exc:
+            print(f"Failed to initialize RAG Chatbot: {exc}")
+    return _rag_chatbot_instance
+
+
+# Keep module-level name for backward compatibility with imports.
 rag_chatbot = None
-if settings.GROQ_API_KEY:
-    try:
-        rag_chatbot = RAGChatbot(persist_directory="./chroma_db")
-        print("Global RAG Chatbot initialized in router.")
-    except Exception as exc:
-        print(f"Failed to initialize RAG Chatbot: {exc}")
 
 
 class ChatGenerateRequest(BaseModel):
@@ -184,7 +199,7 @@ async def chat_with_ai(
     current_user: User = Depends(get_current_user),
 ):
     """Send message to RAG AI and save both prompt and response to database."""
-    if rag_chatbot is None:
+    if get_rag_chatbot() is None:
         raise HTTPException(status_code=503, detail="AI Service unavailable.")
 
     session = db.query(ChatbotSession).filter(ChatbotSession.id == req.session_id).first()
@@ -220,7 +235,7 @@ async def chat_with_ai(
                 fallback_retrieval_filter = base_retrieval_filter
             else:
                 retrieval_filter = base_retrieval_filter
-        response_data = rag_chatbot.chat(
+        response_data = get_rag_chatbot().chat(
             req.message,
             req.session_id,
             current_user.id,
@@ -266,7 +281,7 @@ async def upload_pdf_to_rag(
     current_user: User = Depends(get_current_user),
 ):
     """Upload a PDF and index it directly into the RAG vector store."""
-    if rag_chatbot is None:
+    if get_rag_chatbot() is None:
         raise HTTPException(status_code=503, detail="AI Service unavailable.")
 
     filename = str(file.filename or "").strip()
@@ -308,7 +323,7 @@ async def upload_pdf_to_rag(
     if normalized_student_id:
         base_metadata["student_id"] = normalized_student_id
 
-    index_prepared_document(rag_chatbot, prepared, base_metadata)
+    index_prepared_document(get_rag_chatbot(), prepared, base_metadata)
 
     return {
         "message": "PDF indexed successfully.",
@@ -325,14 +340,14 @@ async def upload_pdf_to_rag(
 @router.get("/rag/status", dependencies=[Depends(require_role("admin"))])
 async def rag_status():
     """Operational status for RAG backend."""
-    if rag_chatbot is None:
+    if get_rag_chatbot() is None:
         return {
             "ready": False,
             "message": "AI Service unavailable.",
             "llm_ready": False,
             "retrieval_ready": False,
         }
-    info = rag_chatbot.status()
+    info = get_rag_chatbot().status()
     retrieval_message = str(info.get("retrieval_message") or "").strip().lower()
     if retrieval_message == "vector_store_not_initialized":
         message = "RAG retrieval is not initialized. The embedding/vector store is unavailable."
@@ -348,9 +363,9 @@ async def rag_status():
 @router.delete("/rag/clear", dependencies=[Depends(require_role("admin"))], status_code=status.HTTP_200_OK)
 async def clear_rag_index():
     """Clear indexed RAG documents while keeping chatbot service online."""
-    if rag_chatbot is None:
+    if get_rag_chatbot() is None:
         raise HTTPException(status_code=503, detail="AI Service unavailable.")
-    result = rag_chatbot.clear_index()
+    result = get_rag_chatbot().clear_index()
     if not result.get("cleared"):
         reason = str(result.get("reason") or "").strip().lower() or "unknown_error"
         if reason == "vector_store_not_initialized":
