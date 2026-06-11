@@ -582,13 +582,6 @@ function ChatTab({ launchIntent }) {
         });
         await syncServiceSession(conversationId, activeSession.id);
       } else {
-        const formattedHistory = (activeSession.messages || [])
-          .filter(m => m.text)
-          .map(m => ({
-            role: m.role === "user" ? "user" : "assistant",
-            content: m.text
-          }));
-
         const res = await fetch("https://worry-undergo-coma.ngrok-free.dev/ask", {
           method: "POST",
           headers: {
@@ -597,15 +590,19 @@ function ChatTab({ launchIntent }) {
             "ngrok-skip-browser-warning": "true"
           },
           body: JSON.stringify({
-            question: prompt,
-            history: formattedHistory,
+            question: prompt.trim(),
           }),
         });
+
+        if (!res.ok) {
+          throw new Error("API request failed");
+        }
+
         const data = await res.json();
         
         const responseType = null;
-        const responseText = data?.answer || t("chatbot_your_question_was_received_but_there_is_");
-        
+        const responseText = data?.answer || "عذراً، لم أتمكن من الحصول على إجابة.";
+
         updateActive((s) => ({
           ...s,
           conversationId: s.conversationId || `ngrok-${Date.now()}`,
@@ -626,7 +623,7 @@ function ChatTab({ launchIntent }) {
     } catch (e) {
       updateActive((s) => ({
         ...s,
-        messages: [...s.messages, createMessage("model", isServiceMessage ? `${t("chatbot_error_while_contacting_student_services")}: ${e.message}` : `${t("chatbot_error_while_contacting_rag_service")}: ${e.message}`)],
+        messages: [...s.messages, createMessage("model", isServiceMessage ? `${t("chatbot_error_while_contacting_student_services")}: ${e.message}` : "حدث خطأ أثناء جلب الإجابة، حاول مرة أخرى.")],
       }));
     } finally { setIsLoading(false); }
   };
