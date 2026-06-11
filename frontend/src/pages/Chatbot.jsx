@@ -582,6 +582,13 @@ function ChatTab({ launchIntent }) {
         });
         await syncServiceSession(conversationId, activeSession.id);
       } else {
+        const formattedHistory = (activeSession.messages || [])
+          .filter(m => m.text)
+          .map(m => ({
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.text
+          }));
+
         const res = await fetch("https://worry-undergo-coma.ngrok-free.dev/ask", {
           method: "POST",
           headers: {
@@ -590,6 +597,7 @@ function ChatTab({ launchIntent }) {
           },
           body: JSON.stringify({
             question: prompt,
+            history: formattedHistory,
           }),
         });
         const data = await res.json();
