@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import List, Optional
+import httpx
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
@@ -183,10 +184,7 @@ async def chat_with_ai(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Send message to RAG AI and save both prompt and response to database."""
-    if rag_chatbot is None:
-        raise HTTPException(status_code=503, detail="AI Service unavailable.")
-
+    """Send message to external ngrok AI and save both prompt and response to database."""
     session = db.query(ChatbotSession).filter(ChatbotSession.id == req.session_id).first()
     if not session or session.student_id != current_user.id:
         raise HTTPException(status_code=404, detail="Valid Session not found or owned by you")
@@ -201,41 +199,21 @@ async def chat_with_ai(
     db.add(user_msg)
 
     try:
-        is_regulation_query = _is_regulation_intent(req.message)
-        normalized_message = _normalize_scope_text(req.message)
-        is_light_chat_query = normalized_message in {"", "hi", "hello", "hey", "مرحبا", "اهلا", "السلام عليكم"}
-        should_use_retrieval = bool(not is_light_chat_query and len(str(req.message or "").strip()) >= 2)
-        should_require_grounded_retrieval = bool(is_regulation_query and not is_light_chat_query)
-        retrieval_filter = None
-        fallback_retrieval_filter = None
-        if should_use_retrieval:
-            base_retrieval_filter = {
-                "student_id": str(current_user.id),
-                "level": _normalize_scope_text(getattr(current_user, "level", "") or ""),
-                "college_key": _canonical_college_key(getattr(current_user, "college", "") or ""),
-                "sources": ["student_guide_pdf", "storage_pdf", "knowledge_text"],
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            payload = {
+                "question": req.message,
+                "enhance_query": False
             }
-            if is_regulation_query:
-                retrieval_filter = {**base_retrieval_filter, "preferred_content_type": "regulation", "content_type": "regulation"}
-                fallback_retrieval_filter = base_retrieval_filter
-            else:
-                retrieval_filter = base_retrieval_filter
-        response_data = rag_chatbot.chat(
-            req.message,
-            req.session_id,
-            current_user.id,
-            retrieval_filter=retrieval_filter,
-            fallback_retrieval_filter=fallback_retrieval_filter,
-            require_retrieval=should_require_grounded_retrieval,
-            retrieve_context=should_use_retrieval,
-            min_retrieval_score=0.22 if is_regulation_query else 0.0,
-            allow_general_fallback_override=bool(not is_light_chat_query),
-        )
-        ai_text = response_data["answer"]
-        sources = response_data.get("sources", [])
+            response = await client.post("https://worry-undergo-coma.ngrok-free.dev/", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            
+            ai_text = data.get("answer", "عذراً، لم أتمكن من الحصول على إجابة.")
+            sources = data.get("top_3_pages", [])
+            sources = [f"Page {s}" for s in sources]
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"AI Error: {str(exc)}")
+        raise HTTPException(status_code=500, detail=f"External AI Error: {str(exc)}")
 
     ai_msg = ChatbotMessage(
         session_id=session.id,
