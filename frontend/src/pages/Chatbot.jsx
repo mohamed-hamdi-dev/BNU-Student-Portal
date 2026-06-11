@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useTranslation } from "react-i18next";
@@ -582,25 +582,34 @@ function ChatTab({ launchIntent }) {
         });
         await syncServiceSession(conversationId, activeSession.id);
       } else {
-        const data = await apiFetch("/api/chat", {
-            method: "POST",
-            body: JSON.stringify({ message: prompt, conversation_id: activeSession.conversationId, student_id: currentStudentId }) 
+        const res = await fetch("https://worry-undergo-coma.ngrok-free.dev/ask", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({
+            question: prompt,
+          }),
         });
-        const responseType = String(data?.type || "").trim().toUpperCase() || null;
-        const responseText = data?.answer || data?.response || t("chatbot_your_question_was_received_but_there_is_");
+        const data = await res.json();
+        
+        const responseType = null;
+        const responseText = data?.answer || t("chatbot_your_question_was_received_but_there_is_");
+        
         updateActive((s) => ({
           ...s,
-          conversationId: data?.conversation_id || s.conversationId,
+          conversationId: s.conversationId || `ngrok-${Date.now()}`,
           messages: [
             ...s.messages,
             createMessage("model", responseText, {
               responseType,
-              source: data?.source || null,
-              actions: Array.isArray(data?.actions) ? data.actions : [],
-              sources: Array.isArray(data?.sources) ? data.sources : [],
-              assets: Array.isArray(data?.assets) ? data.assets : [],
-              relatedContent: Array.isArray(data?.related_content) ? data.related_content : [],
-              display: data?.display || null,
+              source: null,
+              actions: [],
+              sources: Array.isArray(data?.top_3_pages) ? data.top_3_pages.map(p => `Page ${p}`) : [],
+              assets: [],
+              relatedContent: [],
+              display: null,
             }),
           ],
         }));
