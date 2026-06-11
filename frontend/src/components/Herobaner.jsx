@@ -13,7 +13,7 @@ const Basic = () => (
                     </div>
                     <div
                         className="w-[6em] h-[6em] text-transparent bg-clip-text drop-shadow-[0_4px_6px_rgba(0,0,0,0.3)] tracking-wide  animate-[fadeIn_1.2s_ease-in-out] ">
-                        <img src="./public/assets/images/logo.png" alt="" />
+                        <img src="/assets/images/logo.png" alt="" />
                     </div>
                 </div>
             </div>
