@@ -1,9 +1,7 @@
 """
 Security utilities: JWT token creation/verification and password hashing.
 
-Uses PyJWT for tokens and bcrypt for password hashing/verification.
-Passlib is kept as a primary path, but we gracefully fall back to direct
-bcrypt checks when passlib backend issues occur in some environments.
+Uses PyJWT for tokens and bcrypt directly for password hashing/verification.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -11,39 +9,28 @@ from typing import Optional
 
 import jwt
 import bcrypt
-from passlib.context import CryptContext
 
 from core.config import get_settings
 
 settings = get_settings()
 
+
 # ── Password Hashing ─────────────────────────────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
 def hash_password(plain_password: str) -> str:
     """Hash a plain-text password using bcrypt."""
-    # Prefer passlib for consistency with existing data.
-    try:
-        return pwd_context.hash(plain_password)
-    except Exception:
-        salt = bcrypt.gensalt(rounds=12)
-        return bcrypt.hashpw(plain_password.encode("utf-8"), salt).decode("utf-8")
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(plain_password.encode("utf-8"), salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain-text password against a bcrypt hash."""
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8"),
+        )
     except Exception:
-        # Fallback for environments where passlib backend wiring fails.
-        try:
-            return bcrypt.checkpw(
-                plain_password.encode("utf-8"),
-                hashed_password.encode("utf-8"),
-            )
-        except Exception:
-            return False
+        return False
 
 
 # ── JWT Tokens ────────────────────────────────────────────────────────
