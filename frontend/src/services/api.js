@@ -1,5 +1,19 @@
 // Centralized API Client for FastAPI Backend
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const isLocalHostName = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return false;
+  if (value === "localhost" || value === "0.0.0.0" || value === "::1") return true;
+  if (value.startsWith("127.")) return true;
+  if (value.startsWith("10.")) return true;
+  if (value.startsWith("192.168.")) return true;
+  const m = value.match(/^172\.(\d{1,3})\./);
+  if (m) {
+    const second = Number(m[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+};
 
 function normalizeApiBase(rawBase) {
   const base = String(rawBase || "").trim();
@@ -17,11 +31,21 @@ function normalizeApiBase(rawBase) {
 
 function resolveApiBase() {
   const normalizedBase = normalizeApiBase(RAW_API_BASE);
-  // Prefer same-origin /api when frontend is served over HTTPS but env points to HTTP.
   if (!normalizedBase) return "";
   try {
     const parsed = new URL(normalizedBase);
     const pageProtocol = typeof window !== "undefined" ? window.location.protocol : "";
+    const pageHost = typeof window !== "undefined" ? window.location.hostname : "";
+    const isLocalPage = isLocalHostName(pageHost);
+    const isLocalApi = isLocalHostName(parsed.hostname);
+
+    // In local development, always prefer same-origin "/api" through Vite proxy.
+    // This avoids localhost/IPv6/protocol mismatches and keeps one stable path.
+    if (isLocalPage) {
+      return "";
+    }
+
+    // Prefer same-origin /api when frontend is served over HTTPS but env points to HTTP.
     if (pageProtocol === "https:" && parsed.protocol === "http:") {
       return "";
     }
@@ -86,6 +110,14 @@ function withLoopbackFallback(url) {
     }
   } catch {
     // ignore malformed URL and keep defaults
+  }
+
+  // If URL is relative (/api/...), add explicit local backend fallbacks.
+  if (typeof url === "string" && url.startsWith("/")) {
+    urls.push(`http://127.0.0.1:8000${url}`);
+    urls.push(`http://localhost:8000${url}`);
+    urls.push(`https://127.0.0.1:8000${url}`);
+    urls.push(`https://localhost:8000${url}`);
   }
 
   return [...new Set(urls)];

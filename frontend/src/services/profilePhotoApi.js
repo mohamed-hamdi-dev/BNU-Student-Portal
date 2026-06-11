@@ -1,6 +1,20 @@
 import { apiFetch } from "./api";
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const isLocalHostName = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return false;
+  if (value === "localhost" || value === "0.0.0.0" || value === "::1") return true;
+  if (value.startsWith("127.")) return true;
+  if (value.startsWith("10.")) return true;
+  if (value.startsWith("192.168.")) return true;
+  const m = value.match(/^172\.(\d{1,3})\./);
+  if (m) {
+    const second = Number(m[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+};
 
 const normalizeApiBase = (rawValue) => {
   const value = String(rawValue || "").trim();
@@ -10,7 +24,24 @@ const normalizeApiBase = (rawValue) => {
   return `https://${value}`;
 };
 
-const API_BASE = normalizeApiBase(RAW_API_BASE);
+const resolveApiBase = () => {
+  const normalizedBase = normalizeApiBase(RAW_API_BASE);
+  if (!normalizedBase) return "";
+  try {
+    const parsed = new URL(normalizedBase);
+    const pageProtocol = typeof window !== "undefined" ? window.location.protocol : "";
+    const pageHost = typeof window !== "undefined" ? window.location.hostname : "";
+    const isLocalPage = isLocalHostName(pageHost);
+    const isLocalApi = isLocalHostName(parsed.hostname);
+    if (isLocalPage && !isLocalApi) return "";
+    if (pageProtocol === "https:" && parsed.protocol === "http:") return "";
+    return normalizedBase;
+  } catch {
+    return normalizedBase;
+  }
+};
+
+const API_BASE = resolveApiBase();
 
 export const toAbsoluteFileUrl = (value = "") => {
   if (!value) return "";

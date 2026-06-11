@@ -590,7 +590,9 @@ function ChatTab({ launchIntent }) {
             "ngrok-skip-browser-warning": "true"
           },
           body: JSON.stringify({
-            question: prompt.trim(),
+            ask: prompt.trim(),
+            enhance_query: false,
+            history: [],
           }),
         });
 
@@ -599,9 +601,10 @@ function ChatTab({ launchIntent }) {
         }
 
         const data = await res.json();
+        console.log("RAG Response:", data);
         
         const responseType = null;
-        const responseText = data?.answer || "عذراً، لم أتمكن من الحصول على إجابة.";
+        const responseText = typeof data === "string" ? data : data?.answer || "عذراً، لم أتمكن من الحصول على إجابة.";
 
         updateActive((s) => ({
           ...s,
@@ -1033,7 +1036,7 @@ function ChatBubble({ message }) {
           const content = isBullet ? trimmed.replace(/^[-*•]\s+/, "") : trimmed;
 
           return (
-            <p key={`line-${idx}`} className="m-0 leading-6">
+            <p key={`line-${idx}`} className="m-0 leading-6 font-[470]">
               {isBullet ? <span className="ml-1">• </span> : null}
               {renderInlineMarkdown(content)}
             </p>
@@ -1114,7 +1117,7 @@ function ChatBubble({ message }) {
             <Bot size={14} />
           </div>
         )}
-        <div className={`chatbot-bubble relative max-w-[92%] sm:max-w-[85%] px-3 py-2 rounded-2xl text-[13px] sm:text-sm shadow-sm leading-6 whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${isUser ? "chatbot-bubble-user bg-[#05ADCF] text-white rounded-bl-md" : "chatbot-bubble-bot bg-white text-gray-800 rounded-br-md border border-slate-200"}`}>
+        <div className={`chatbot-bubble relative max-w-[92%] sm:max-w-[85%] px-3 py-2 rounded-2xl text-[13px] sm:text-sm font-[470] shadow-sm leading-[1.7] whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${isUser ? "chatbot-bubble-user bg-[#05ADCF] text-white rounded-bl-md" : "chatbot-bubble-bot bg-white text-gray-800 rounded-br-md border border-slate-200"}`}>
           {renderMessageText(displayText)}
           {!isUser && isDisplayMessage && (
             <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">

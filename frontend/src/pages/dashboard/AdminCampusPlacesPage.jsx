@@ -11,6 +11,7 @@ import {
   MdLocationCity,
 } from "react-icons/md";
 import { campusPlacesApi } from "../../services/campusPlacesApi";
+import Swal from "sweetalert2";
 
 const emptyForm = {
   name: "",
@@ -162,7 +163,28 @@ export default function AdminCampusPlacesPage() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm(t("admin.places.messages.confirmDelete"))) return;
+    const result = await Swal.fire({
+      title: t("admin.common.confirmDelete") || "تأكيد الحذف",
+      text: t("admin.places.messages.confirmDelete"),
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: t("admin.common.delete") || "حذف",
+      cancelButtonText: t("admin.common.cancel") || "إلغاء",
+      buttonsStyling: false,
+      background: "#0f1720",
+      color: "#e7f9f7",
+      customClass: {
+        popup: "rounded-3xl border border-[#1f3640]",
+        confirmButton: "px-5 py-2.5 rounded-full font-bold text-slate-900 bg-[#79e6df] border-2 border-[#79e6df] mx-1",
+        cancelButton: "px-5 py-2.5 rounded-full font-bold text-[#d7f6f2] bg-[#0e7f79] border border-[#0e7f79] mx-1",
+      },
+      didOpen: (el) => {
+        el.style.direction = "rtl";
+        el.style.textAlign = "right";
+      },
+    });
+    if (!result.isConfirmed) return;
+
     setMessage("");
     try {
       await campusPlacesApi.remove(id);
