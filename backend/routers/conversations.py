@@ -130,8 +130,12 @@ async def list_conversations(
         Conversation,
         User.full_name.label("student_name"),
         User.username.label("student_username"),
+        ConversationRating.score.label("rating_score"),
+        ConversationRating.comment.label("rating_comment"),
     ).join(
         User, Conversation.student_id == User.id
+    ).outerjoin(
+        ConversationRating, Conversation.id == ConversationRating.conversation_id
     ).filter(
         Conversation.type == "support"
     )
@@ -149,9 +153,11 @@ async def list_conversations(
 
     # Map the join result to the Pydantic schema
     response = []
-    for conv, student_name, student_username in results:
+    for conv, student_name, student_username, rating_score, rating_comment in results:
         conv.student_name = student_name
         conv.student_username = student_username
+        conv.rating_score = rating_score
+        conv.rating_comment = rating_comment
         response.append(conv)
 
     return response

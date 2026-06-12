@@ -1,5 +1,5 @@
-﻿import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Send, User } from "lucide-react";
+import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { Send, User, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { liveChatService } from "../../../services/liveChatService";
 import { ThemeContext } from "../../../context/ThemeContext.jsx";
@@ -184,6 +184,12 @@ export default function ChatView({ adminProfile = {}, loading = false }) {
                                     <span className={`rounded-full px-2 py-0.5 text-[10px] ${conv.is_student_online ? "bg-emerald-500 text-white" : "bg-slate-500 text-slate-100"}`}>
                                         {conv.is_student_online ? t("live_chat_status_online") : t("live_chat_status_offline")}
                                     </span>
+                                    {conv.rating_score && (
+                                        <div className="flex items-center gap-0.5 text-amber-400 mt-0.5">
+                                            <Star size={10} className="fill-current" />
+                                            <span className="text-[10px] font-bold leading-none">{conv.rating_score}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </button>
@@ -204,6 +210,13 @@ export default function ChatView({ adminProfile = {}, loading = false }) {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        {selectedConversation?.rating_score && (
+                            <div className="hidden sm:flex items-center gap-1 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200" title={selectedConversation.rating_comment}>
+                                <Star size={14} className="fill-amber-400 text-amber-400" />
+                                <span className="text-xs font-bold text-amber-600">{selectedConversation.rating_score}/5</span>
+                                {selectedConversation.rating_comment && <span className="text-[10px] text-amber-700 max-w-[120px] truncate ml-1">"{selectedConversation.rating_comment}"</span>}
+                            </div>
+                        )}
                         <span className={`rounded-full px-2 py-1 text-[10px] sm:text-xs ${selectedConversation?.status === "closed" ? "bg-rose-500" : selectedConversation?.is_student_online ? "bg-green-500" : "bg-slate-500"}`}>
                             {selectedConversation?.status === "closed" ? t("live_chat_status_closed") : selectedConversation?.is_student_online ? t("live_chat_status_online") : t("live_chat_status_offline")}
                         </span>

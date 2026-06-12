@@ -52,6 +52,8 @@ class ConversationResponse(ConversationBase):
     # Optional fields for frontend convenience
     student_name: str | None = None
     student_username: str | None = None
+    rating_score: int | None = None
+    rating_comment: str | None = None
 
     class Config:
         from_attributes = True
