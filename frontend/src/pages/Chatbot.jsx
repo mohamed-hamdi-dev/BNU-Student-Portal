@@ -732,7 +732,7 @@ function ChatTab({ launchIntent }) {
             sessions={sessions}
             activeSessionId={activeSession?.id}
             onSelect={handleSelectSession}
-            onCreate={() => createNewChat("general")}
+            onCreate={createNewChat}
             onDelete={removeSession}
             onClose={() => setHistoryDrawerOpen(false)}
           />
@@ -877,6 +877,8 @@ function ChatTab({ launchIntent }) {
 function HistoryPanel({ sessions, activeSessionId, onSelect, onCreate, onDelete, onClose }) {
   const { t, i18n } = useTranslation("global");
   const { isDarkMode } = useContext(ThemeContext);
+  const [activeTab, setActiveTab] = useState("general");
+
   const formatUpdatedAt = (value) => {
     const date = new Date(value || "");
     if (Number.isNaN(date.getTime())) return "";
@@ -884,38 +886,66 @@ function HistoryPanel({ sessions, activeSessionId, onSelect, onCreate, onDelete,
     return date.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   };
 
+  const filteredSessions = sessions.filter(s => {
+    if (activeTab === "service") return s.mode === "service";
+    return s.mode !== "service";
+  });
+
   return (
     <div className="chatbot-history-panel h-full flex flex-col bg-gradient-to-b from-[#f8fcff] to-white">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/80">
-        <h3 className="text-[15px] font-black text-slate-800">{t("chatbot_new_chat")}</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-[15px] font-black text-slate-800">{isArabicLanguage(i18n.language) ? "سجل المحادثات" : "Chat History"}</h3>
+          
+          <div className="flex items-center bg-slate-100/80 rounded-lg p-0.5 border border-slate-200/50">
+            <button
+              type="button"
+              title={isArabicLanguage(i18n.language) ? "الذكاء الاصطناعي" : "AI Chat"}
+              onClick={() => setActiveTab("general")}
+              className={`p-1.5 rounded-md transition ${activeTab === "general" ? "bg-white text-[#05ADCF] shadow-sm border border-slate-200/50" : "text-slate-400 hover:text-slate-600"}`}
+            >
+              <Bot size={15} />
+            </button>
+            <button
+              type="button"
+              title={isArabicLanguage(i18n.language) ? "الدعم الفني" : "Support"}
+              onClick={() => setActiveTab("service")}
+              className={`p-1.5 rounded-md transition ${activeTab === "service" ? "bg-white text-[#05ADCF] shadow-sm border border-slate-200/50" : "text-slate-400 hover:text-slate-600"}`}
+            >
+              <MessageCircle size={15} />
+            </button>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={onClose}
-          className="w-8 h-8 rounded-xl border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:border-slate-300 transition"
+          className="w-8 h-8 rounded-xl border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:border-slate-300 transition flex items-center justify-center"
         >
-          <X size={15} className="mx-auto" />
+          <X size={15} />
         </button>
       </div>
 
       <div className="p-3 border-b border-slate-200/70">
         <button
           type="button"
-          onClick={onCreate}
-          className="w-full rounded-2xl bg-[#05ADCF] text-white py-2.5 text-sm font-bold hover:bg-[#0494b1] shadow-[0_10px_18px_rgba(5,173,207,0.22)] transition"
+          onClick={() => onCreate(activeTab)}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#05ADCF] text-white py-2.5 text-[13px] font-bold hover:bg-[#0494b1] shadow-[0_10px_18px_rgba(5,173,207,0.22)] transition"
         >
-          {t("chatbot_new_chat_2")}
+          {activeTab === "service" ? (isArabicLanguage(i18n.language) ? "+ تذكرة دعم فني جديدة" : "+ New Support Ticket") : `+ ${t("chatbot_new_chat_2") || "محادثة جديدة"}`.replace("++", "+")}
         </button>
       </div>
 
       <div className="dot-scroll flex-1 overflow-y-auto px-2 py-2.5">
-        {!sessions.length && (
-          <div className="h-full flex items-center justify-center text-xs text-slate-400">
+        {!filteredSessions.length && (
+          <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400 gap-2">
+            {activeTab === "service" ? <MessageCircle size={32} className="opacity-20" /> : <Bot size={32} className="opacity-20" />}
             {t("chatbot_no_chats_yet")}
           </div>
         )}
 
         <div className="space-y-1.5">
-          {sessions.map((s) => {
+          {filteredSessions.map((s) => {
             const isActive = activeSessionId === s.id;
             return (
               <div

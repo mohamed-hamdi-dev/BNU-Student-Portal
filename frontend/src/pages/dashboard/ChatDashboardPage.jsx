@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { BarChart2, ChevronRight, Database, Home, IdCard, Menu, MessageCircle, MessageSquare, PlusSquare, Settings, Trash2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SidebarItem } from "./chatDashboard/shared";
@@ -412,48 +412,7 @@ export default function ChatDashboardPage() {
                         isMobileMenuOpen ? "!bg-transparent lg:!bg-[#05ADCF]/5" : ""
                     }`}
                 >
-                    {activeTab === "home" && (
-                        <div className="mb-4 rounded-2xl border border-cyan-200 bg-cyan-50/70 p-3" dir={isRTL ? "rtl" : "ltr"}>
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                    <p className="text-sm font-black text-cyan-900">{t("chat_ai_source_title")}</p>
-                                    <p className="text-xs font-bold text-cyan-800">{t("chat_ai_source_description")}</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    disabled={aiUploadBusy || aiClearBusy}
-                                    onClick={() => aiKnowledgeInputRef.current?.click()}
-                                    className="inline-flex items-center gap-2 rounded-xl border border-cyan-300 bg-white px-4 py-2 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100 disabled:opacity-60"
-                                >
-                                    <Database size={16} />
-                                    {aiUploadBusy ? t("chat_ai_upload_loading") : t("chat_ai_upload")}
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={aiUploadBusy || aiClearBusy}
-                                    onClick={handleAiKnowledgeClear}
-                                    className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-black text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60"
-                                >
-                                    <Trash2 size={16} />
-                                    {aiClearBusy ? t("chat_ai_clear_loading") : t("chat_ai_clear")}
-                                </button>
-                                <input ref={aiKnowledgeInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handleAiKnowledgeUpload} />
-                            </div>
-                            {aiUploadStatus && (
-                                <div
-                                    className={`mt-2 rounded-xl border px-3 py-2 text-xs font-bold ${
-                                        aiUploadStatus.type === "success"
-                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                            : aiUploadStatus.type === "error"
-                                                ? "border-red-200 bg-red-50 text-red-700"
-                                                : "border-cyan-200 bg-cyan-100 text-cyan-800"
-                                    }`}
-                                >
-                                    {aiUploadStatus.message}
-                                </div>
-                            )}
-                        </div>
-                    )}
+
                     {renderContent()}
                 </div>
             </main>
