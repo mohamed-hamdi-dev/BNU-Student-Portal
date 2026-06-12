@@ -582,7 +582,7 @@ function ChatTab({ launchIntent }) {
         });
         await syncServiceSession(conversationId, activeSession.id);
       } else {
-        const res = await fetch("https://worry-undergo-coma.ngrok-free.dev/ask", {
+        const res = await fetch("https://remindful-tattle-audience.ngrok-free.dev/ask", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

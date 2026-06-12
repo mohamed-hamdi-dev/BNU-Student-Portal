@@ -198,7 +198,7 @@ async def chat_with_ai(
                 "enhance_query": False,
                 "history": []
             }
-            response = await client.post("https://worry-undergo-coma.ngrok-free.dev/ask", json=payload)
+            response = await client.post("https://remindful-tattle-audience.ngrok-free.dev/ask", json=payload)
             response.raise_for_status()
             data = response.json()
             
