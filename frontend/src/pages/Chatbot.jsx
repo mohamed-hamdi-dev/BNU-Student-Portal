@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { createPortal } from "react-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Bot, Calculator, Download, ExternalLink, GraduationCap, Home, Layers, MapPin, Maximize2, Menu, MessageCircle, Mic, Monitor, Search, Send, Smartphone, Star, Tablet, Trash2, Upload, User, X } from "lucide-react";
+import { AlertCircle, Bot, Calculator, Download, ExternalLink, GraduationCap, Home, Layers, MapPin, Maximize2, Menu, MessageCircle, Mic, Monitor, Search, Send, Smartphone, Star, Tablet, Trash2, Upload, User, X, ChevronDown, Check, Languages, FileText, Sparkles } from "lucide-react";
 import { LuAudioLines } from "react-icons/lu";
 import { MdAccountBalance, MdBusinessCenter, MdDoorFront, MdLocalHospital, MdLocalLibrary, MdLocalParking, MdMyLocation, MdSchool } from "react-icons/md";
 import { Controller, useForm } from "react-hook-form";
@@ -262,6 +262,127 @@ function HomeTab({ onNavigate }) {
     </div>
   );
 }
+
+function ChatModeSelector({ aiMode, setAiMode }) {
+  const { t, i18n } = useTranslation("global");
+  const isAr = String(i18n.language || "ar").toLowerCase().startsWith("ar");
+  const [isOpen, setIsOpen] = useState(false);
+  const [fileToolsExpanded, setFileToolsExpanded] = useState(false);
+  const buttonRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.top - 8,
+        left: isAr ? rect.left : rect.right,
+      });
+    }
+  }, [isOpen, isAr]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target) &&
+        buttonRef.current && !buttonRef.current.contains(e.target)
+      ) {
+        setIsOpen(false);
+        setFileToolsExpanded(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const getLabel = () => {
+    if (aiMode === "translation") return isAr ? "ترجمة" : "Translation";
+    if (aiMode === "summarization") return isAr ? "تلخيص" : "Summarization";
+    return isAr ? "المحادثة العامة" : "General Chat";
+  };
+
+  return (
+    <>
+      <button 
+        ref={buttonRef}
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        title={getLabel()}
+        className={`w-8 h-8 rounded-xl transition flex items-center justify-center ${isOpen ? "bg-[#05ADCF]/10 text-[#05ADCF]" : "bg-transparent hover:bg-slate-100 text-slate-600"}`}
+      >
+        {aiMode === "translation" ? (
+          <Languages size={18} className="text-[#05ADCF]" />
+        ) : aiMode === "summarization" ? (
+          <FileText size={18} className="text-[#05ADCF]" />
+        ) : (
+          <Sparkles size={18} />
+        )}
+      </button>
+
+      {isOpen && createPortal(
+        <div
+          ref={dropdownRef}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed w-56 bg-white rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.15)] border border-slate-200 p-2 text-slate-800 flex flex-col gap-1 cursor-default"
+          style={{
+            zIndex: 99999,
+            top: "auto",
+            bottom: `${window.innerHeight - dropdownPos.top}px`,
+            ...(isAr ? { left: `${dropdownPos.left}px` } : { right: `${window.innerWidth - dropdownPos.left}px` }),
+          }}
+          dir={isAr ? "rtl" : "ltr"}
+        >
+          <button 
+            onClick={() => { setAiMode("general"); setIsOpen(false); setFileToolsExpanded(false); }}
+            className={`flex items-center justify-between w-full px-3 py-2.5 rounded-lg transition ${aiMode === "general" ? "bg-[#05ADCF]/10 text-[#05ADCF]" : "hover:bg-slate-50"}`}
+          >
+            <div className="flex flex-col items-start">
+              <span className="text-[12px] font-bold">{isAr ? "المحادثة العامة" : "General Chat"}</span>
+              <span className={`text-[10px] mt-0.5 ${aiMode === "general" ? "text-[#05ADCF]/70" : "text-slate-500"}`}>{isAr ? "محادثة ذكية بدون ملفات" : "Smart chat without files"}</span>
+            </div>
+            {aiMode === "general" && <Check size={14} className="text-[#05ADCF]" />}
+          </button>
+          
+          <div>
+            <button 
+              onClick={() => setFileToolsExpanded(!fileToolsExpanded)}
+              className="flex items-center justify-between w-full px-3 py-2.5 rounded-lg hover:bg-slate-50 transition"
+            >
+              <div className="flex flex-col items-start">
+                <span className="text-[12px] font-bold">{isAr ? "أدوات ذكية" : "AI Tools"}</span>
+                <span className="text-[10px] text-slate-500 mt-0.5">{isAr ? "ترجمة وتلخيص بالذكاء الاصطناعي" : "AI translation & summarization"}</span>
+              </div>
+              <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${fileToolsExpanded ? "rotate-180" : "rotate-0"}`} />
+            </button>
+            
+            <div className={`overflow-hidden transition-all duration-200 ${fileToolsExpanded ? "max-h-40 opacity-100 mt-1" : "max-h-0 opacity-0"}`}>
+              <div className="pr-2 pl-2 flex flex-col gap-0.5">
+                <button 
+                  onClick={() => { setAiMode("translation"); setIsOpen(false); setFileToolsExpanded(false); }}
+                  className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg transition ${aiMode === "translation" ? "bg-[#05ADCF]/10 text-[#05ADCF]" : "hover:bg-slate-50 text-slate-700"}`}
+                >
+                  <Languages size={14} className={aiMode === "translation" ? "text-[#05ADCF]" : "text-slate-400"} />
+                  <span className="text-[11px] font-semibold">{isAr ? "ترجمة (Translation)" : "Translation"}</span>
+                  {aiMode === "translation" && <Check size={12} className="mr-auto ml-auto" />}
+                </button>
+                <button 
+                  onClick={() => { setAiMode("summarization"); setIsOpen(false); setFileToolsExpanded(false); }}
+                  className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg transition ${aiMode === "summarization" ? "bg-[#05ADCF]/10 text-[#05ADCF]" : "hover:bg-slate-50 text-slate-700"}`}
+                >
+                  <FileText size={14} className={aiMode === "summarization" ? "text-[#05ADCF]" : "text-slate-400"} />
+                  <span className="text-[11px] font-semibold">{isAr ? "تلخيص (Summarization)" : "Summarization"}</span>
+                  {aiMode === "summarization" && <Check size={12} className="mr-auto ml-auto" />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 function ChatTab({ launchIntent }) {
   const { t, i18n } = useTranslation("global");
   const { isDarkMode } = useContext(ThemeContext);
@@ -304,6 +425,9 @@ function ChatTab({ launchIntent }) {
   const [serviceRatingComment, setServiceRatingComment] = useState("");
 
   const [submittingServiceRating, setSubmittingServiceRating] = useState(false);
+  
+  const [aiMode, setAiMode] = useState("general");
+  const [selectedFile, setSelectedFile] = useState(null);
 
   const chatRef = useRef(null);
   const promptsRef = useRef(null);
@@ -444,7 +568,6 @@ function ChatTab({ launchIntent }) {
       setSessions((prev) => [serviceSession, ...prev]);
     }
     setActiveSessionId(serviceSession.id);
-    setHistoryDrawerOpen(false);
 
     let conversationId = serviceSession.conversationId;
     if (!conversationId && String(serviceSession?.conversationStatus || "").toLowerCase() === "closed") {
@@ -527,7 +650,7 @@ function ChatTab({ launchIntent }) {
 
   const sendMessage = async (presetText) => {
     const prompt = (presetText || userInput).trim();
-    if (!prompt || isLoading || !activeSession) return;
+    if ((!prompt && !selectedFile) || isLoading || !activeSession) return;
     const isServiceMessage = activeSession.mode === "service";
     if (isServiceMessage && String(activeSession?.conversationStatus || "").trim().toLowerCase() === "closed") {
       // Allow students to continue the same thread; backend reactivates it on next message.
@@ -537,11 +660,13 @@ function ChatTab({ launchIntent }) {
       ...s,
       studentId: s?.studentId || currentStudentId,
       studentName: s?.studentName || loggedUser?.name || t("chatbot_student"),
-      title: (s.title === t("chatbot_new_chat") || s.title === t("chatbot_student_services")) ? prompt.slice(0, 32) : s.title,
+      title: (s.title === t("chatbot_new_chat") || s.title === t("chatbot_student_services")) ? (prompt || selectedFile?.name || "ملف").slice(0, 32) : s.title,
       updatedAt: new Date().toISOString(),
-      messages: [...s.messages, createMessage("user", prompt, isServiceMessage ? { isRead: false, isServiceMessage: true, senderType: "student" } : {})]
+      messages: [...s.messages, createMessage("user", prompt, isServiceMessage ? { isRead: false, isServiceMessage: true, senderType: "student", attachedFile: selectedFile?.name, attachedFileUrl: selectedFile ? URL.createObjectURL(selectedFile) : null } : { attachedFile: selectedFile?.name, attachedFileUrl: selectedFile ? URL.createObjectURL(selectedFile) : null })]
     }));
-    setUserInput(""); setIsLoading(true);
+    setUserInput(""); 
+    setSelectedFile(null);
+    setIsLoading(true);
     try {
       if (isServiceMessage) {
         if (!isStudentRole) {
@@ -582,6 +707,20 @@ function ChatTab({ launchIntent }) {
         });
         await syncServiceSession(conversationId, activeSession.id);
       } else {
+        if (aiMode === "translation") {
+          // Mock translation or throw error indicating it's not connected yet
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          throw new Error("Translation API is not connected yet.");
+        } else if (aiMode === "summarization") {
+          // Mock summarization or throw error indicating it's not connected yet
+          if (!selectedFile) {
+            throw new Error("Please select a file to summarize.");
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          throw new Error("Summarization API is not connected yet.");
+        }
+
+        // Only hit the General Chat (ngrok) API if aiMode is 'general'
         const res = await fetch("https://remindful-tattle-audience.ngrok-free.dev/ask", {
           method: "POST",
           headers: {
@@ -624,9 +763,20 @@ function ChatTab({ launchIntent }) {
         }));
       }
     } catch (e) {
+      let errorMessage = isAr ? "حدث خطأ أثناء جلب الإجابة، حاول مرة أخرى." : "An error occurred while fetching the answer, try again.";
+      if (e.message === "Translation API is not connected yet.") {
+        errorMessage = isAr ? "عذراً، سيتم ربط API الترجمة قريباً. (غير متصل حالياً)" : "Translation API will be connected soon. (Not connected currently)";
+      } else if (e.message === "Summarization API is not connected yet.") {
+        errorMessage = isAr ? "عذراً، سيتم ربط API التلخيص قريباً. (غير متصل حالياً)" : "Summarization API will be connected soon. (Not connected currently)";
+      } else if (e.message === "Please select a file to summarize.") {
+        errorMessage = isAr ? "الرجاء اختيار ملف (PDF أو DOCX) للتلخيص أولاً من علامة الرفع ⬆️." : "Please select a file to summarize first.";
+      } else if (isServiceMessage) {
+        errorMessage = `${t("chatbot_error_while_contacting_student_services")}: ${e.message}`;
+      }
+
       updateActive((s) => ({
         ...s,
-        messages: [...s.messages, createMessage("model", isServiceMessage ? `${t("chatbot_error_while_contacting_student_services")}: ${e.message}` : "حدث خطأ أثناء جلب الإجابة، حاول مرة أخرى.")],
+        messages: [...s.messages, createMessage("model", errorMessage)],
       }));
     } finally { setIsLoading(false); }
   };
@@ -742,7 +892,7 @@ function ChatTab({ launchIntent }) {
       <div className="flex-1 flex flex-col min-w-0">
         <div className="chatbot-chat-header px-2.5 sm:px-3 py-2 border-b border-white/70 bg-white/55 backdrop-blur-2xl flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <button onClick={() => setHistoryDrawerOpen(true)} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><Menu size={16} /></button>
+            <button onClick={(e) => { e.stopPropagation(); setHistoryDrawerOpen(true); }} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><Menu size={16} /></button>
             <div className="min-w-0">
               <p className="text-sm font-bold text-slate-800 truncate">{activeSession?.title || t("chatbot_chat_2")}</p>
             </div>
@@ -845,29 +995,59 @@ function ChatTab({ launchIntent }) {
         )}
 
         <div className="chatbot-chat-composer p-2.5 sm:p-3 border-t border-slate-200 bg-white">
-          {!isServiceMode && activeSession?.messages?.length <= 1 && (
-            <>
-              <div ref={promptsRef} onScroll={onPromptsScroll} className="dot-scroll mb-1 flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory">{suggestedPrompts.map((p) => <button key={p} onClick={() => sendMessage(p)} className="snap-start text-[11px] px-2.5 py-1.5 rounded-full bg-slate-100 hover:bg-[#05ADCF]/10 text-slate-600 hover:text-[#048aa5] transition whitespace-nowrap shrink-0">{p}</button>)}</div>
-              {promptPagesCount > 1 && <div className="mb-2 flex items-center justify-center gap-1.5">{Array.from({ length: promptPagesCount }).map((_, i) => <button key={i} onClick={() => goToPromptPage(i)} className={`h-1.5 rounded-full transition-all ${i === promptPage ? "w-4 bg-[#05ADCF]" : "w-1.5 bg-slate-300"}`} />)}</div>}
-            </>
-          )}
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-1.5 sm:p-2 flex items-center gap-1.5 sm:gap-2">
-            <input
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              placeholder={t("chatbot_type_your_question_here")}
-              disabled={isLoading}
-              className="flex-1 bg-transparent px-2 py-2 text-[13px] sm:text-sm outline-none"
-            />
-            <button onClick={startRecording} disabled={isLoading} className={`w-8 h-8 rounded-xl transition flex items-center justify-center ${isRecording ? "bg-red-500 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"}`}>{isRecording ? <LuAudioLines size={15} /> : <Mic size={15} />}</button>
-            <button onClick={() => sendMessage()} disabled={isLoading} className="w-8 h-8 rounded-xl bg-[#05ADCF] text-white hover:bg-[#0494b1] transition flex items-center justify-center disabled:opacity-50"><Send size={15} /></button>
-          </div>
+
+
+           <div className="flex flex-col gap-1.5">
+              {selectedFile && !isServiceMode && aiMode === "summarization" && (
+                <div className="flex items-center gap-2 bg-[#05ADCF]/10 text-[#05ADCF] px-3 py-1.5 rounded-lg w-fit ml-auto mr-2 sm:mr-3 border border-[#05ADCF]/20">
+                  <FileText size={14} />
+                  <span className="text-xs font-semibold max-w-[200px] truncate">{selectedFile.name}</span>
+                  <button onClick={() => setSelectedFile(null)} className="hover:bg-[#05ADCF]/20 rounded-full p-0.5 transition">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-1.5 sm:p-2 flex items-center gap-1 sm:gap-1.5">
+                <input
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder={t("chatbot_type_your_question_here")}
+                  disabled={isLoading}
+                  className="flex-1 bg-transparent px-2 py-2 text-[13px] sm:text-sm outline-none"
+                />
+                {!isServiceMode && <ChatModeSelector aiMode={aiMode} setAiMode={setAiMode} />}
+                {!isServiceMode && aiMode === "summarization" && (
+                  <>
+                    <input type="file" id="chat-file-upload" className="hidden" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        const file = e.target.files[0];
+                        if (file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
+                          setSelectedFile(file);
+                        } else {
+                          alert(isAr ? "يرجى اختيار ملف بصيغة PDF أو DOCX فقط." : "Please select a PDF or DOCX file only.");
+                          e.target.value = null;
+                        }
+                      }
+                    }} />
+                    <button
+                      onClick={() => document.getElementById('chat-file-upload').click()}
+                      title={isAr ? "رفع ملف للتلخيص" : "Upload file for summarization"}
+                      className={`w-8 h-8 rounded-xl transition flex items-center justify-center ${selectedFile ? "bg-[#05ADCF]/10 text-[#05ADCF]" : "bg-transparent hover:bg-slate-100 text-slate-600"}`}
+                    >
+                      <Upload size={16} />
+                    </button>
+                  </>
+                )}
+                <button onClick={startRecording} disabled={isLoading} className={`w-8 h-8 rounded-xl transition flex items-center justify-center ${isRecording ? "bg-red-500 text-white" : "bg-transparent hover:bg-slate-200 text-slate-600"}`}>{isRecording ? <LuAudioLines size={16} /> : <Mic size={16} />}</button>
+                <button onClick={() => sendMessage()} disabled={isLoading} className="w-8 h-8 rounded-xl bg-[#05ADCF] text-white hover:bg-[#0494b1] transition flex items-center justify-center disabled:opacity-50"><Send size={15} /></button>
+              </div>
+           </div>
         </div>
       </div>
     </div>
@@ -927,15 +1107,17 @@ function HistoryPanel({ sessions, activeSessionId, onSelect, onCreate, onDelete,
         </div>
       </div>
 
-      <div className="p-3 border-b border-slate-200/70">
-        <button
-          type="button"
-          onClick={() => onCreate(activeTab)}
-          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#05ADCF] text-white py-2.5 text-[13px] font-bold hover:bg-[#0494b1] shadow-[0_10px_18px_rgba(5,173,207,0.22)] transition"
-        >
-          {activeTab === "service" ? (isArabicLanguage(i18n.language) ? "+ تذكرة دعم فني جديدة" : "+ New Support Ticket") : `+ ${t("chatbot_new_chat_2") || "محادثة جديدة"}`.replace(/\+\s*\+/g, "+")}
-        </button>
-      </div>
+      {activeTab !== "service" && (
+        <div className="p-3 border-b border-slate-200/70">
+          <button
+            type="button"
+            onClick={() => onCreate(activeTab)}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#05ADCF] text-white py-2.5 text-[13px] font-bold hover:bg-[#0494b1] shadow-[0_10px_18px_rgba(5,173,207,0.22)] transition"
+          >
+            {`+ ${t("chatbot_new_chat_2") || "محادثة جديدة"}`.replace(/\+\s*\+/g, "+")}
+          </button>
+        </div>
+      )}
 
       <div className="dot-scroll flex-1 overflow-y-auto px-2 py-2.5">
         {!filteredSessions.length && (
@@ -1067,7 +1249,7 @@ function ChatBubble({ message }) {
           const content = isBullet ? trimmed.replace(/^[-*•]\s+/, "") : trimmed;
 
           return (
-            <p key={`line-${idx}`} className="m-0 leading-6 font-[470]">
+            <p key={`line-${idx}`} className="m-0 leading-relaxed font-normal">
               {isBullet ? <span className="ml-1">• </span> : null}
               {renderInlineMarkdown(content)}
             </p>
@@ -1148,7 +1330,24 @@ function ChatBubble({ message }) {
             <Bot size={14} />
           </div>
         )}
-        <div className={`chatbot-bubble relative max-w-[92%] sm:max-w-[85%] px-3 py-2 rounded-2xl text-[13px] sm:text-sm font-[470] shadow-sm leading-[1.7] whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${isUser ? "chatbot-bubble-user bg-[#05ADCF] text-white rounded-bl-md" : "chatbot-bubble-bot bg-white text-gray-800 rounded-br-md border border-slate-200"}`}>
+        <div className={`chatbot-bubble relative max-w-[92%] sm:max-w-[85%] px-3 py-2.5 rounded-2xl text-[13px] sm:text-sm font-sans font-normal shadow-sm leading-[1.75] whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${isUser ? "chatbot-bubble-user bg-[#05ADCF] text-white rounded-bl-md" : "chatbot-bubble-bot bg-white text-gray-800 rounded-br-md border border-slate-200"}`}>
+          {message.attachedFile && (
+            <button 
+              onClick={() => {
+                if (message.attachedFile.toLowerCase().endsWith('.pdf') && message.attachedFileUrl) {
+                  setPreviewPdf(message.attachedFileUrl);
+                } else if (message.attachedFileUrl) {
+                  // For DOCX, trigger download/open natively
+                  window.open(message.attachedFileUrl, '_blank');
+                }
+              }}
+              className="flex items-center gap-2 bg-black/10 hover:bg-black/20 transition-colors border border-black/5 rounded-lg px-2.5 py-1.5 mb-2 w-fit text-left cursor-pointer" 
+              dir="ltr"
+            >
+              <FileText size={14} className="opacity-80 shrink-0" />
+              <span className="text-[12px] font-semibold opacity-90 truncate max-w-[150px] sm:max-w-[200px]">{message.attachedFile}</span>
+            </button>
+          )}
           {renderMessageText(displayText)}
           {!isUser && isDisplayMessage && (
             <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
