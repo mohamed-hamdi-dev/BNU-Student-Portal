@@ -18,6 +18,11 @@ import { normalizeAcademicYearValue } from "../utils/academicData";
 import { ThemeContext } from "../context/ThemeContext.jsx";
 
 const SERVICE_POLL_MS = 3000;
+const GENERAL_CHAT_API_URL = "https://remindful-tattle-audience.ngrok-free.dev/ask";
+const TRANSLATION_API_URL = "https://lucid-mumble-wand.ngrok-free.dev/translate";
+const SUMMARIZE_TEXT_API_URL = "https://lucid-mumble-wand.ngrok-free.dev/summarize";
+const SUMMARIZE_LECTURE_API_URL = "https://lucid-mumble-wand.ngrok-free.dev/summarize-lecture";
+const CALCULATE_GPA_API_URL = "https://lucid-mumble-wand.ngrok-free.dev/calculate-gpa";
 const isArabicLanguage = (lang) => String(lang || "ar").toLowerCase().startsWith("ar");
 const sizeModes = [
   { id: "mobile", label: "Mobile", icon: Smartphone, classes: "w-[92vw] max-w-[400px] h-[76vh] max-h-[690px]" },
@@ -55,6 +60,42 @@ const getHomeCards = (t) => [
 ];
 
 const createMessage = (role, text, meta = {}) => ({ id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, role, text, timestamp: new Date().toISOString(), ...meta });
+const extractAiResponseText = (data, fallbackText) => {
+  if (typeof data === "string") return data;
+  const candidates = [
+    data?.answer,
+    data?.response,
+    data?.message,
+    data?.result,
+    data?.output,
+    data?.translated_text,
+    data?.translation,
+    data?.summary,
+    data?.summarized_text,
+    data?.calculation,
+    data?.gpa,
+    data?.final_grade,
+    data?.data?.answer,
+    data?.data?.response,
+    data?.data?.result,
+    data?.data?.translated_text,
+    data?.data?.translation,
+    data?.data?.summary,
+    data?.data?.calculation,
+    data?.data?.gpa,
+    data?.data?.final_grade,
+  ];
+  const picked = candidates.find((value) => typeof value === "string" && value.trim() || typeof value === "number");
+  if (picked !== undefined && picked !== null) return String(picked);
+  if (data && typeof data === "object") {
+    try {
+      return JSON.stringify(data, null, 2);
+    } catch {
+      return fallbackText;
+    }
+  }
+  return fallbackText;
+};
 const appendAccessToken = (url) => {
   const token = localStorage.getItem("access_token");
   if (!token) return url;
@@ -708,20 +749,100 @@ function ChatTab({ launchIntent }) {
         await syncServiceSession(conversationId, activeSession.id);
       } else {
         if (aiMode === "translation") {
-          // Mock translation or throw error indicating it's not connected yet
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          throw new Error("Translation API is not connected yet.");
-        } else if (aiMode === "summarization") {
-          // Mock summarization or throw error indicating it's not connected yet
-          if (!selectedFile) {
-            throw new Error("Please select a file to summarize.");
+          const res = await fetch(TRANSLATION_API_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "ngrok-skip-browser-warning": "true"
+            },
+            body: JSON.stringify({
+              text: prompt.trim(),
+              target_language: isAr ? "ar" : "en",
+            }),
+          });
+
+          if (!res.ok) {
+            throw new Error("Translation API request failed");
           }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          throw new Error("Summarization API is not connected yet.");
+
+          const data = await res.json();
+          const responseText = extractAiResponseText(data, isAr ? "Could not get a translation." : "Could not get a translation.");
+
+          updateActive((s) => ({
+            ...s,
+            conversationId: s.conversationId || `translate-${Date.now()}`,
+            messages: [
+              ...s.messages,
+              createMessage("model", responseText, {
+                responseType: "translation",
+                source: null,
+                actions: [],
+                sources: [],
+                assets: [],
+                relatedContent: [],
+                display: null,
+              }),
+            ],
+          }));
+          return;
+        } else if (aiMode === "summarization") {
+          let res;
+          if (selectedFile) {
+            const formData = new FormData();
+            formData.append("file", selectedFile);
+            formData.append("lecture_name", prompt || selectedFile.name.replace(/\.[^.]+$/, "") || "Lecture");
+
+            res = await fetch(SUMMARIZE_LECTURE_API_URL, {
+              method: "POST",
+              headers: {
+                "Accept": "application/json",
+                "ngrok-skip-browser-warning": "true"
+              },
+              body: formData,
+            });
+          } else {
+            res = await fetch(SUMMARIZE_TEXT_API_URL, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "ngrok-skip-browser-warning": "true"
+              },
+              body: JSON.stringify({
+                text: prompt.trim(),
+              }),
+            });
+          }
+
+          if (!res.ok) {
+            throw new Error("Summarization API request failed");
+          }
+
+          const data = await res.json();
+          const responseText = extractAiResponseText(data, isAr ? "Could not get a summary." : "Could not get a summary.");
+
+          updateActive((s) => ({
+            ...s,
+            conversationId: s.conversationId || `summarize-${Date.now()}`,
+            messages: [
+              ...s.messages,
+              createMessage("model", responseText, {
+                responseType: "summary",
+                source: null,
+                actions: [],
+                sources: Array.isArray(data?.top_3_pages) ? data.top_3_pages.map(p => `Page ${p}`) : [],
+                assets: [],
+                relatedContent: [],
+                display: null,
+              }),
+            ],
+          }));
+          return;
         }
 
         // Only hit the General Chat (ngrok) API if aiMode is 'general'
-        const res = await fetch("https://remindful-tattle-audience.ngrok-free.dev/ask", {
+        const res = await fetch(GENERAL_CHAT_API_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -743,7 +864,7 @@ function ChatTab({ launchIntent }) {
         console.log("RAG Response:", data);
         
         const responseType = null;
-        const responseText = typeof data === "string" ? data : data?.answer || "عذراً، لم أتمكن من الحصول على إجابة.";
+        const responseText = extractAiResponseText(data, "عذراً، لم أتمكن من الحصول على إجابة.");
 
         updateActive((s) => ({
           ...s,
@@ -1589,6 +1710,119 @@ function ChatBubble({ message }) {
 
 const LoadingIndicator = () => <div className="flex items-center gap-2 mb-3"><div className="w-7 h-7 rounded-full bg-[#05ADCF]/10 flex items-center justify-center"><Bot size={14} className="text-[#05ADCF]" /></div><div className="chatbot-loading-bubble bg-white px-4 py-2 rounded-2xl border border-slate-200 shadow-sm flex gap-1"><span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" /><span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:120ms]" /><span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:240ms]" /></div></div>;
 
+function GpaAiChat() {
+  const { i18n } = useTranslation("global");
+  const isAr = isArabicLanguage(i18n.language);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState([
+    {
+      role: "model",
+      text: isAr
+        ? "اكتب سؤالك عن المعدل أو درجة الفاينل المطلوبة."
+        : "Ask about your GPA or required final exam grade.",
+    },
+  ]);
+  const [loading, setLoading] = useState(false);
+
+  const sendGpaPrompt = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setInput("");
+    setLoading(true);
+    try {
+      const res = await fetch(CALCULATE_GPA_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!res.ok) {
+        throw new Error("GPA calculation request failed");
+      }
+
+      const data = await res.json();
+      const reply = extractAiResponseText(data, isAr ? "تعذر حساب المعدل الآن." : "Could not calculate GPA right now.");
+      setMessages((prev) => [...prev, { role: "model", text: reply }]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "model",
+          text: isAr ? "حصل خطأ أثناء التواصل مع API حساب المعدل." : "An error occurred while calling the GPA API.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-[#05ADCF]/20 bg-white shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-[#05ADCF]/5 px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#05ADCF]/10 text-[#05ADCF]">
+            <Sparkles size={16} />
+          </div>
+          <div>
+            <p className="text-sm font-black text-slate-800">{isAr ? "مساعد المعدل" : "GPA Assistant"}</p>
+            <p className="text-[11px] text-slate-500">{isAr ? "اسأل عن GPA أو درجات الفاينل" : "Ask about GPA or finals"}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="dot-scroll max-h-44 space-y-2 overflow-y-auto bg-slate-50/70 p-3">
+        {messages.map((message, idx) => (
+          <div key={`gpa-ai-${idx}`} className={`flex ${message.role === "user" ? "justify-start" : "justify-end"}`}>
+            <div className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[12px] leading-6 shadow-sm ${
+              message.role === "user"
+                ? "rounded-bl-md bg-[#05ADCF] text-white"
+                : "rounded-br-md border border-slate-200 bg-white text-slate-700"
+            }`}>
+              {message.text}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-end">
+            <div className="rounded-2xl rounded-br-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-400 shadow-sm">...</div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 border-t border-slate-100 bg-white p-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sendGpaPrompt();
+            }
+          }}
+          disabled={loading}
+          placeholder={isAr ? "مثال: محتاج أجيب كام في الفاينل؟" : "Example: What final grade do I need?"}
+          className="min-w-0 flex-1 rounded-xl bg-slate-100 px-3 py-2 text-[12px] outline-none"
+        />
+        <button
+          type="button"
+          onClick={sendGpaPrompt}
+          disabled={loading || !input.trim()}
+          className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#05ADCF] text-white transition hover:bg-[#0494b1] disabled:opacity-50"
+          title={isAr ? "إرسال" : "Send"}
+        >
+          <Send size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GpaTab() {
   const { t, i18n } = useTranslation("global");
   const { isDarkMode } = useContext(ThemeContext);
@@ -1848,6 +2082,8 @@ function GpaTab() {
         <p className="text-sm font-bold text-slate-800">{t("chatbot_accumulative_gpa")}</p>
         <p className="text-[11px] text-slate-500 mt-1">{t("chatbot_update_cumulative_gpa_based_on_current_t")}</p>
       </button>
+
+      <GpaAiChat />
     </div>
   );
 }
