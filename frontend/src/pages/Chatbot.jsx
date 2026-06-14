@@ -1337,15 +1337,21 @@ function ChatBubble({ message }) {
                 if (message.attachedFile.toLowerCase().endsWith('.pdf') && message.attachedFileUrl) {
                   setPreviewPdf(message.attachedFileUrl);
                 } else if (message.attachedFileUrl) {
-                  // For DOCX, trigger download/open natively
                   window.open(message.attachedFileUrl, '_blank');
                 }
               }}
-              className="flex items-center gap-2 bg-black/10 hover:bg-black/20 transition-colors border border-black/5 rounded-lg px-2.5 py-1.5 mb-2 w-fit text-left cursor-pointer" 
+              className="flex items-center gap-3 bg-white hover:bg-slate-50 text-slate-800 transition-colors shadow-sm rounded-xl px-3 py-2.5 mb-2 w-full max-w-[240px] text-left cursor-pointer group" 
               dir="ltr"
             >
-              <FileText size={14} className="opacity-80 shrink-0" />
-              <span className="text-[12px] font-semibold opacity-90 truncate max-w-[150px] sm:max-w-[200px]">{message.attachedFile}</span>
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${message.attachedFile.toLowerCase().endsWith('.pdf') ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                <FileText size={18} className="group-hover:scale-110 transition-transform" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[13px] font-bold truncate leading-tight">{message.attachedFile}</span>
+                <span className="text-[10px] text-slate-500 font-medium mt-0.5 uppercase tracking-wider">
+                  {message.attachedFile.split('.').pop()} Document
+                </span>
+              </div>
             </button>
           )}
           {renderMessageText(displayText)}
